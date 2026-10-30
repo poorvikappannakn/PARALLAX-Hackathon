@@ -7,7 +7,8 @@ Every value the agent handles carries a trust label (where it came from, how sen
 decided **ALLOW / DENY / REQUIRE_APPROVAL** by a deterministic policy engine, with an inspectable reason and an audit record —
 failing closed when policy or provenance is insufficient.
 
-> Status: **project foundation (M0)**. Features are under active development — see `HACKATHON_HANDOFF.md`.
+> Status: **M1 complete** — provenance model and deterministic policy engine implemented and unit-tested.
+> Tools, gateway, agent, API and dashboard are in progress — see `HACKATHON_HANDOFF.md`.
 
 ## Requirements
 - Node.js 24+ (uses built-in `node:sqlite`), npm 11+. Windows PowerShell supported (use `npm.cmd` if script execution is blocked).

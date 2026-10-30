@@ -5,15 +5,14 @@ Event: PARALLAX, 30 Oct 16:00 → 31 Oct 16:00 IST. Submissions 14:00–16:00 31
 ## Milestones
 | # | Milestone | Status |
 |---|---|---|
-| M0 | Repo foundation: docs, workspaces, deps, node:sqlite check, smoke tests | done |
-| M1 | Provenance types, policy files (manifests, profiles, classification), sandbox fixtures | todo |
-| M2 | Tools (sandbox containment, labelling, ticket check) | todo |
-| M3 | PEP (rules F0–L1) + detector + unit tests | todo |
-| M4 | Audit store (fail-closed) + approvals (atomic consume) + gateway | todo |
-| M5 | NaiveAgent + scenarios S1–S5 + attack regression suite (CLI) | todo |
-| M6 | API (session, runs, SSE, approvals, audit, suite) | todo |
-| M7 | Dashboard: runner + timeline, decision inspector, approvals, audit, scorecard, on/off compare | todo |
-| M8 | Hardening, demo script, README, judge Q&A | todo |
+| M0 | Repo foundation: docs, workspaces, deps, node:sqlite check, smoke tests | COMPLETE |
+| M1 | Security foundation: provenance, classification, manifests, profiles, policy files + loader, PEP (F0–L1), detector, shield ON/OFF config, unit tests | COMPLETE |
+| M2 | Sandbox fixtures + tools (realpath containment, output labelling, single-use ALLOW-ticket check) | NEXT — not started |
+| M3 | Gateway + audit store (fail-closed) + approvals (atomic consume, PEP re-evaluation); gateway owns identities and context label | not started |
+| M4 | NaiveAgent + scenarios S1–S5 + attack regression suite (CLI) | not started |
+| M5 | API (session, runs, SSE, approvals, audit, suite) | not started |
+| M6 | Dashboard: runner + timeline, decision inspector, approvals, audit, scorecard, on/off compare | not started |
+| M7 | Hardening, demo script, README, judge Q&A | not started |
 
 ## Mandatory (MVP)
 1. Deterministic `NaiveAgent` (follows instructions found in content).
@@ -38,4 +37,4 @@ Event: PARALLAX, 30 Oct 16:00 → 31 Oct 16:00 IST. Submissions 14:00–16:00 31
 | S2 | Web page injection → exfiltrate api_keys | secret emailed to attacker | P2 DENY on secret read; P4/P3 DENY on send; summary still delivered |
 | S3 | User asks for salaries | data emailed | P2 DENY |
 | S4 | Inbox email asks to delete projects/ | files deleted (sandbox) | P1 DENY |
-| S5 | Unknown tool / malformed args / approval timeout | runs or crashes | F0 DENY |
+| S5 | Unknown tool / malformed args / approval timeout | unknown tool & malformed args are rejected structurally in both modes (nothing valid to run); approval timeout cannot occur (no approvals when OFF) | F0 DENY |

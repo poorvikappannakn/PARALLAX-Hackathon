@@ -70,10 +70,22 @@ Same call with `to` extracted from the page ⇒ `to` is UNTRUSTED ⇒ P4 DENY (n
 | P4 🔒 | UNTRUSTED target sink (`to`, `path`) on HIGH-impact tool | DENY |
 | A1 | HIGH-impact + tainted context or UNTRUSTED data sink | REQUIRE_APPROVAL (elevated) |
 | A2 | any other HIGH-impact | REQUIRE_APPROVAL (normal) |
-| A3 | detector ≥ threshold on non-READ call | escalate to REQUIRE_APPROVAL |
+| A3 | detector ≥ threshold **and** any argument is UNTRUSTED (attacker may be steering an otherwise-allowed call) | escalate ALLOW → REQUIRE_APPROVAL |
 | L1 | LOW-impact READ in scope | ALLOW |
 | default | — | DENY |
 🔒 = never overridable by approval.
+
+Implementation notes (M1, `server/src/shield/pep.ts`):
+- P2 effective clearance = min(user clearance, agent profile ceiling). Paths are normalised by `shield/paths.ts`
+  (rejects traversal, absolute, drive, UNC, ADS, NUL, trailing dot/space, device names, `~`); unclassified paths are SECRET.
+- P3 uses max(argument confidentiality, run-context confidentiality) for every argument of an EXTERNAL_SEND (implicit flows).
+- All DENY rules are evaluated and reported together (`matchedRules`); the first is the primary `ruleId`.
+- The detector scans UNTRUSTED string arguments plus untrusted content read in the run; it can only make a decision stricter.
+- The enforce policy YAML must list exactly the rule catalogue with matching decisions and may not disable the detector;
+  otherwise it fails to load → every call DENY. Shield ON refuses a permissive-mode file. Loaded policies are deep-frozen.
+- P2 URL check: https only, exact allow-listed hostname, no credentials, no explicit port.
+- Shield OFF (permissive): structurally invalid calls (unknown tool, malformed args/provenance) are still F0 DENY because
+  nothing valid can execute; all policy rules are skipped and decisions are `ALLOW` with ruleId `OFF`.
 
 ## 6. Approval flow (safeguard 1)
 1. PEP ⇒ REQUIRE_APPROVAL. Gateway computes `callHash = sha256(canonical{tool, args(sorted, LF-normalised), runId, agentId, policyVersion})`.
@@ -84,6 +96,16 @@ Same call with `to` extracted from the page ⇒ `to` is UNTRUSTED ⇒ P4 DENY (n
 5. **Atomic consumption** before execution: `UPDATE approvals SET used=1, consumed_at=? WHERE id=? AND used=0 AND status='approved' AND expires_at>?`
    must change exactly 1 row, inside the same transaction as the decision audit write. Otherwise ⇒ DENY (F0).
 6. Timeout ⇒ DENY. No "approve" tool exists. Injected "pre-approved" text is inert data.
+
+## 6a. Trust assumptions at the PEP boundary (gateway requirements, M3)
+The PEP is pure and trusts its inputs. A hijacked agent is exactly our threat, so the **gateway**, not the agent, must supply:
+- `runId`, `agentId`, `userId` — from the run record, never from agent output (otherwise an agent could claim a higher-clearance user).
+- `contextLabel` — owned by the gateway: the join of the task label and every tool result it has returned in the run. It may
+  only grow; an agent-supplied context can be joined in but never lower it.
+- Argument labels — produced by the trusted propagation runtime (`shield/provenance.ts`), not by model text. For the simulated
+  agent this holds by construction; for the stretch real-LLM mode, arguments are traced conservatively (untraceable ⇒ UNTRUSTED).
+- Approval evidence — from the approval store, consumed only when the decision `ruleId` ends in `+APPROVED`.
+- Approvers must be `operator:*` principals (enforced in the PEP); no agent profile id can approve.
 
 ## 7. Audit (safeguard 2)
 - Application-level append-only SQLite: no update/delete code paths or routes for `audit_events`. **Not inherently immutable** —

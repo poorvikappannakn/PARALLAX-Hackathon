@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 type Health = { ok: boolean; node: string; sqlite: string };
 
-// Foundation placeholder: confirms the web app can reach the API. Dashboard comes in M7.
+// Foundation placeholder: confirms the web app can reach the API. Dashboard comes in M6.
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [error, setError] = useState<string | null>(null);

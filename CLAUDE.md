@@ -22,6 +22,9 @@ Read `HACKATHON_HANDOFF.md` first for the current state. Architecture lives in `
 8. **All data synthetic.** `.test` domains, fake keys, fake people. Never add real personal data or real secrets.
 9. **The agent never receives operator/approver credentials** or session cookies, and has no HTTP client.
 10. Server binds to `127.0.0.1` only.
+11. **The gateway owns identities and taint.** `runId/agentId/userId` come from the run record; the context label is maintained
+    by the gateway from tool outputs and only grows; labels and identities are never taken from agent/model output.
+    Only `operator:*` principals may approve (see `docs/SYSTEM_ARCHITECTURE.md` §6a).
 
 ## Scope discipline
 - Mandatory vs stretch features are fixed in `docs/IMPLEMENTATION_PLAN.md`. Do not build stretch items until all mandatory items pass.
