@@ -88,20 +88,20 @@ Implementation notes (M1, `server/src/shield/pep.ts`):
   nothing valid can execute; all policy rules are skipped and decisions are `ALLOW` with ruleId `OFF`.
 
 ## 6. Approval flow (safeguard 1)
-1. PEP ⇒ REQUIRE_APPROVAL. Gateway computes `callHash = sha256(canonical{tool, args(sorted, LF-normalised), runId, agentId, policyVersion})`.
+1. PEP ⇒ REQUIRE_APPROVAL. Gateway computes `callHash = sha256(canonical{tool, args(sorted, LF-normalised, incl. provenance), runId, agentId, userId, policyVersion})`.
 2. Approval row created: `pending`, `expires_at = now + 5 min`, `requester = agentId`.
 3. Human decides via `POST /api/approvals/:id/decision` (approver session + CSRF). `approver != requester` enforced.
 4. Gateway **re-invokes the PEP** with `{approval}`. All DENY rules run first and can still deny. An A-rule is satisfied only if
    approval is `approved`, unexpired, unused, and `callHash` matches the recomputed hash (incl. current policy version).
-5. **Atomic consumption** before execution: `UPDATE approvals SET used=1, consumed_at=? WHERE id=? AND used=0 AND status='approved' AND expires_at>?`
-   must change exactly 1 row, inside the same transaction as the decision audit write. Otherwise ⇒ DENY (F0).
+5. **Atomic consumption** before execution: `UPDATE approvals SET used=1, consumed_at=? WHERE id=? AND used=0 AND status='approved' AND expires_at>? AND call_hash=?`
+   must change exactly 1 row, inside the same transaction as the `re_decision` audit write. Otherwise ⇒ DENY (F0).
 6. Timeout ⇒ DENY. No "approve" tool exists. Injected "pre-approved" text is inert data.
 
-## 6a. Trust assumptions at the PEP boundary (gateway requirements, M3)
+## 6a. Trust assumptions at the PEP boundary (gateway requirements — implemented in M3, see §6c)
 The PEP is pure and trusts its inputs. A hijacked agent is exactly our threat, so the **gateway**, not the agent, must supply:
 - `runId`, `agentId`, `userId` — from the run record, never from agent output (otherwise an agent could claim a higher-clearance user).
 - `contextLabel` — owned by the gateway: the join of the task label and every tool result it has returned in the run. It may
-  only grow; an agent-supplied context can be joined in but never lower it.
+  only grow. Agent requests that carry a context label (or any label or identity field) are rejected.
 - Argument labels — produced by the trusted propagation runtime (`shield/provenance.ts`), not by model text. For the simulated
   agent this holds by construction; for the stretch real-LLM mode, arguments are traced conservatively (untraceable ⇒ UNTRUSTED).
 - Approval evidence — from the approval store, consumed only when the decision `ruleId` ends in `+APPROVED`.
@@ -125,10 +125,50 @@ The PEP is pure and trusts its inputs. A hijacked agent is exactly our threat, s
   `.test` URLs to local fixture files (no network client exists). `send_email` writes JSON (with per-argument provenance) to the
   run outbox and rejects multi-line subjects. These checks are independent of policy, so they also hold with Shield OFF.
 
+## 6c. ToolGateway, audit and approvals (M3, implemented)
+`server/src/gateway/gateway.ts` — `startRun(deps, spec)` creates the server-side run record, the run sandbox and a gateway.
+- **Agent request format (only):** `{ tool, args: { <name>: { ref } | { value } } }`, strict. Identity fields, labels or any
+  other keys are rejected and audited (`request_rejected`).
+- **Labels are assigned by the gateway:** `{ref}` resolves to a gateway-held labelled value (`task.text`, `task.<param>` and
+  `user.email` from the run spec/user profile, `out-N` from tool outputs). `{value}` is labelled
+  `generated(contextLabel)` — the join of everything read so far plus `agent:generated` — so it can never be more trusted than
+  the run context. Identities (`runId/agentId/userId`) come only from the run record.
+- **Context label:** starts `TRUSTED INTERNAL user:task`; after every successful tool call it is joined with the output label
+  (grow-only). Untrusted outputs are also fed to the detector.
+- **Order:** build trusted call → `evaluate` → audit `decision` (failure ⇒ halt, nothing executes) → DENY: stop ·
+  REQUIRE_APPROVAL: approval row + `approval_requested` audit in one transaction, store the exact call in memory · ALLOW: issue
+  ticket → executor → audit `outcome` (failure ⇒ halt; reported as "action happened but is unlogged").
+- **Approvals:** `decideApproval(stores, id, approverId, verdict, now)` (`gateway/approvals.ts`) — approver must be in
+  `OPERATORS` (not an agent profile, not the requester), approval must be pending and unexpired; decision + audit row in one
+  transaction. `gateway.resume(id)` re-evaluates the *stored* call through the PEP with the approval as evidence (DENY rules run
+  first). Only an `ALLOW` with `ruleId` ending `+APPROVED` proceeds: `re_decision` audit + atomic `consume` (hash-bound) in one
+  transaction, then ticket → execute → outcome. Rejected/expired/tampered approvals ⇒ DENY F0, audited (`re_decision`).
+  Replayed (already resumed) or unknown approval ids have no stored call in the run: `resume` returns `rejected` and writes a
+  `request_rejected` audit row (approval id + fixed reason only); nothing is re-evaluated or executed. If that audit write fails,
+  the run halts. The same applies when a held call's approval row is missing or belongs to another run ("Approval does not
+  belong to this run"); the held call is also dropped, so it can never be resumed.
+- Shield ON/OFF use the same gateway; OFF never produces REQUIRE_APPROVAL.
+
+**M3 hardening (adversarial review F1–F6):**
+- *Audit redaction:* CONFIDENTIAL/SECRET argument values (and their normalised path form) are scrubbed case-insensitively from
+  every audit text field (args, reasons, outcome details). Detector evidence is stored as score + pattern ids only — excerpts
+  never reach the audit log. Sandbox errors and unknown-reference messages no longer echo values. Agent-chosen tool and argument
+  names that are not in the tool manifests are recorded as `[unknown tool]` / `[unexpected argument N]` (final review).
+  Malformed approval ids passed to `resume` are audited with `approval_id` NULL and a fixed reason.
+- *Import boundaries (ESLint, verified by `tests/import-boundaries.test.ts`):* only `src/gateway/**` may import ticket issuance
+  and the tool executor; `src/agent/**` may only *type*-import the gateway and cannot import approvals, audit, database, PEP,
+  tickets, policy loading, tools, sandbox or Node I/O modules.
+- *Re-evaluation context:* `resume` re-evaluates the exact stored call with `contextLabel = join(stored, current)`; the call
+  hash (which excludes the context label) is unchanged, so the decision can only get stricter.
+- *Accurate failure reporting:* expired-while-pending approvals are reported as expired; a failed re-decision audit write halts
+  the run ("approval not consumed, nothing executed"); a failed consumption is rolled back and audited as such.
+- *Containment:* any unexpected exception in `request`/`resume` halts the run. Audit `seq` is allocated inside the INSERT
+  statement (atomic); `UNIQUE(run_id, seq)` makes any conflicting writer fail closed. Single-process deployment assumed.
+
 ## 7. Audit (safeguard 2)
 - Application-level append-only SQLite: no update/delete code paths or routes for `audit_events`. **Not inherently immutable** —
   someone with OS file access can edit the DB; documented in the threat model.
-- Order per call: write decision row → (if write fails ⇒ no execution, return DENY `audit_unavailable`) → execute →
+- Order per call: write decision row → (if write fails ⇒ no execution, halt run with status `audit_failure`) → execute →
   write outcome row → (if write fails ⇒ halt run with status `audit_failure`, no further actions, report that the sandbox
   action *did* occur but its outcome is unlogged).
 - Monotonic per-run `seq`. Stretch: hash chain + `/api/audit/verify` (tamper *detection*, not prevention).
@@ -152,10 +192,10 @@ sequenceDiagram
   participant D as Audit
   participant Q as Approvals
   participant T as Tool
-  A->>G: request(tool, Labeled args, contextLabel)
-  G->>P: evaluate(call)
+  A->>G: request(tool, args as {ref}|{value})
+  G->>P: evaluate(call with gateway-assigned labels, identities, context)
   P-->>G: decision
-  G->>D: write decision (fail ⇒ DENY, no execution)
+  G->>D: write decision (fail ⇒ halt run, no execution)
   alt REQUIRE_APPROVAL
     G->>Q: create(callHash) and wait (timeout ⇒ DENY)
     Q-->>G: approved

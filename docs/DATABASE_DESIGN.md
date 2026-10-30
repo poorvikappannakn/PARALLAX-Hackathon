@@ -1,60 +1,54 @@
 # Database Design — AgentShield
 
-Engine: Node 24 built-in `node:sqlite` (`DatabaseSync`), file `data/agentshield.db` (git-ignored).
-Fallback if `node:sqlite` misbehaves: `better-sqlite3`, or append-only JSONL.
+Engine: Node 24 built-in `node:sqlite` (`DatabaseSync`). Implemented in `server/src/audit/store.ts` (`createStores(db)`).
+Default file `data/agentshield.db` (git-ignored); tests use `:memory:` or temp files.
 
-Policies, tool manifests, agent profiles and data classification are **versioned files** in `server/src/policy/`, not tables.
+Policies, tool manifests, agent profiles, operators and data classification are **versioned files** in `server/src/policy/`, not tables.
+
+**Integrity guarantee:** `audit_events` is *application-level* append-only — the code exposes no update or delete for it
+(`AuditStore` has only `createRun`, `getRun`, `setRunStatus`, `append`, `listEvents`). This is **not** OS-level tamper-proofing:
+anyone with write access to the database file can alter it. Hash chaining for tamper *detection* is a stretch item.
 
 ## Tables
 ### runs
-| Column | Type | Notes |
-|---|---|---|
-| id | TEXT PK | uuid |
-| scenario_id | TEXT NOT NULL | S1–S5 |
-| shield_mode | TEXT NOT NULL CHECK IN ('on','off') | |
-| policy_id | TEXT NOT NULL | e.g. `policy.yaml@<version>` |
-| user_id | TEXT NOT NULL | |
-| agent_id | TEXT NOT NULL | |
-| status | TEXT NOT NULL | running, awaiting_approval, completed, halted, audit_failure, error |
-| started_at / ended_at | TEXT | ISO-8601 |
+`id` PK · `scenario_id` · `shield_mode` ('on'|'off') · `policy_id` (`<id>@<version>` or `none`) · `user_id` · `agent_id` ·
+`status` (running, awaiting_approval, completed, halted, audit_failure, error) · `started_at` · `ended_at`.
+`status` is informational and may be updated; audit rows are the source of truth.
 
-### audit_events (application-level append-only)
-| Column | Type | Notes |
-|---|---|---|
-| id | INTEGER PK AUTOINCREMENT | |
-| run_id | TEXT NOT NULL FK → runs.id | |
-| seq | INTEGER NOT NULL | monotonic per run; UNIQUE(run_id, seq) |
-| ts | TEXT NOT NULL | |
-| kind | TEXT NOT NULL | decision, re_decision, outcome, run_event |
-| tool | TEXT | |
-| args_json | TEXT | redacted where confidential |
-| provenance_json | TEXT | per-argument labels + context label |
-| decision | TEXT | ALLOW, DENY, REQUIRE_APPROVAL |
-| rule_id | TEXT | |
-| reasons_json | TEXT | |
-| risk | INTEGER | 0–100 |
-| detector_json | TEXT | |
-| call_hash | TEXT | |
-| shield_mode / policy_id | TEXT | evidence for on/off comparison |
-| outcome | TEXT | executed, blocked, failed |
-| prev_hash / hash | TEXT NULL | **stretch** hash chain |
+### audit_events (append-only)
+| Column | Notes |
+|---|---|
+| id | INTEGER PK AUTOINCREMENT |
+| run_id, seq | FK → runs; `seq` monotonic per run; UNIQUE(run_id, seq) |
+| ts | ISO-8601 |
+| kind | run_started, request_rejected, decision, approval_requested, approval_decided, re_decision, outcome, run_halted |
+| user_id, agent_id, shield_mode, policy_id | identity and policy evidence on every row (from server-side run state) |
+| tool | |
+| args_json | argument values; CONFIDENTIAL/SECRET values replaced with `[REDACTED <level>]` (the same values are also scrubbed from reasons and details) |
+| provenance_json | per-argument labels (never redacted) |
+| context_json | run context label at decision time |
+| decision, rule_id, reasons_json, risk, detector_json | PEP decision evidence; `detector_json` = `{score, patterns:[{pattern, weight}]}` (no content excerpts) |
+| call_hash | binding hash (tool, labelled args, run, agent, user, policy version) |
+| approval_id | for approval-related rows |
+| outcome | executed, failed, blocked |
+| detail_json | kind-specific detail (e.g. output label, error code, approver id) |
 
-Index: `(run_id, seq)`. No UPDATE/DELETE statements exist for this table in application code.
+Index: `(run_id, seq)`. `seq` is allocated inside the INSERT statement (`SELECT COALESCE(MAX(seq),0)+1 …`), so allocation and
+insert are atomic; with the single-process demo there is one writer, and `UNIQUE(run_id, seq)` makes any conflicting writer fail.
 
 ### approvals
-| Column | Type | Notes |
-|---|---|---|
-| id | TEXT PK | |
-| run_id | TEXT NOT NULL FK | |
-| audit_event_id | INTEGER NOT NULL FK | |
-| call_hash | TEXT NOT NULL | sha256(tool, canonical args, runId, agentId, policyVersion) |
-| requester_id | TEXT NOT NULL | agent principal |
-| status | TEXT NOT NULL | pending, approved, rejected, expired |
-| approver_id | TEXT | must differ from requester_id |
-| created_at / decided_at / expires_at / consumed_at | TEXT | |
-| used | INTEGER NOT NULL DEFAULT 0 | atomic consume: `UPDATE ... WHERE id=? AND used=0 AND status='approved' AND expires_at>?` → changes must be 1 |
-
+`id` PK (`appr-<uuid>`) · `run_id` FK · `audit_event_id` FK (the decision row) · `tool` · `call_hash` · `requester_id` (agent) ·
+`status` (pending, approved, rejected) · `approver_id` · `created_at` · `decided_at` · `expires_at` (epoch ms) · `used` · `consumed_at`.
 Index: `(status)`.
 
+- Decide: `UPDATE ... SET status=?, approver_id=?, decided_at=? WHERE id=? AND status='pending' AND used=0` (must change 1 row),
+  in the same transaction as the `approval_decided` audit row.
+- Consume: `UPDATE ... SET used=1, consumed_at=? WHERE id=? AND used=0 AND status='approved' AND expires_at>? AND call_hash=?`
+  (must change 1 row), in the same transaction as the `re_decision` audit row. Expiry is evaluated from `expires_at`.
+- Replay / unknown id: a `resume` with no stored call in the run writes a `request_rejected` audit row (`approval_id` + fixed
+  reason in `detail_json`, no argument values) and touches no approval row; if that audit write fails the run halts.
+  Ids not matching the generated format (`appr-<lowercase uuid v4>`, exactly 41 chars) are audited as
+  `request_rejected` "Malformed approval id" with `approval_id` NULL; the caller's input is never stored.
+
 ## Lifecycle
-Demo data is reset by deleting `data/`. Sandbox files are copied per run to `server/runtime/runs/<runId>/` (git-ignored) and may be cleaned at any time.
+Delete `data/` to reset. Per-run sandbox copies live in `server/runtime/runs/<runId>/` (git-ignored).

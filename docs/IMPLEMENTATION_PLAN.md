@@ -8,17 +8,27 @@ Event: PARALLAX, 30 Oct 16:00 → 31 Oct 16:00 IST. Submissions 14:00–16:00 31
 | M0 | Repo foundation: docs, workspaces, deps, node:sqlite check, smoke tests | COMPLETE |
 | M1 | Security foundation: provenance, classification, manifests, profiles, policy files + loader, PEP (F0–L1), detector, shield ON/OFF config, unit tests | COMPLETE |
 | M2 | Sandbox fixtures, per-run sandbox, 5 tools (realpath containment, output labelling), single-use PEP-issued execution tickets | COMPLETE |
-| M3 | Gateway + audit store (fail-closed) + approvals (atomic consume, PEP re-evaluation); gateway owns identities and context label | NEXT — not started |
-| M4 | NaiveAgent + scenarios S1–S5 + attack regression suite (CLI) | not started |
+| M3 | Gateway + audit store (fail-closed) + approvals (atomic consume, PEP re-evaluation); gateway owns identities and context label | COMPLETE |
+| M4 | NaiveAgent + scenarios S1–S5 + attack regression suite (CLI) | NEXT — not started |
 | M5 | API (session, runs, SSE, approvals, audit, suite) | not started |
 | M6 | Dashboard: runner + timeline, decision inspector, approvals, audit, scorecard, on/off compare | not started |
 | M7 | Hardening, demo script, README, judge Q&A | not started |
 
-### M3 required security work
-- **[HIGH] Provenance trust boundary:** the gateway sets identities from the run record, owns the grow-only context label, and
-  never accepts labels or identities from agent output (`SYSTEM_ARCHITECTURE.md` §6a).
-- Decision audit row written before a ticket is issued; outcome-write failure halts the run.
-- Approvals consumed atomically, only for re-evaluated `+APPROVED` decisions.
+### M3 security work (all resolved in M3, see `SYSTEM_ARCHITECTURE.md` §6c)
+- **[HIGH] Provenance trust boundary — resolved:** agent requests are `{ref}|{value}` only; the gateway assigns all labels and
+  identities and owns the grow-only context label.
+- Decision audit row written before a ticket is issued; outcome-write failure halts the run — implemented and tested.
+- Approvals consumed atomically, only for re-evaluated `+APPROVED` decisions — implemented and tested.
+
+### M3 hardening (adversarial review) — COMPLETE
+F1 audit redaction across all fields · F2 agent import restrictions · F3 gateway-only execution imports · F4 re-evaluation with
+current context · F5 accurate failure reasons · F6 error containment and atomic audit sequencing. Regression tests in
+`tests/gateway.test.ts` ("M3 hardening") and `tests/import-boundaries.test.ts`.
+
+### M4 notes
+- The agent must use only the gateway handle (`request`, `resume`, `refs`), injected by the runner; ESLint allows `src/agent/**`
+  only type imports from `gateway/gateway` (see `tests/import-boundaries.test.ts`). The scenario runner should live outside
+  `src/agent/` (e.g. `src/scenarios/`) but may not import tickets/executor — it calls `startRun` and `decideApproval`.
 
 ## Mandatory (MVP)
 1. Deterministic `NaiveAgent` (follows instructions found in content).
