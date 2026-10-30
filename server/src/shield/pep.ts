@@ -1,9 +1,10 @@
 import { z } from "zod";
-import type { ArgSpec, ToolManifest } from "../policy/manifests.js";
+import type { ToolManifest } from "../policy/manifests.js";
 import type { AgentProfile, UserPrincipal } from "../policy/profiles.js";
 import type { Policy } from "../policy/loader.js";
 import { classifyPath } from "../policy/classification.js";
-import { computeCallHash } from "./canonical.js";
+import { validateArgs } from "./arg-schema.js";
+import { bindCallHash } from "./canonical.js";
 import { scanTexts, type DetectorResult } from "./detector.js";
 import { isWithinScopes, normalizeSandboxPath } from "./paths.js";
 import {
@@ -81,23 +82,6 @@ const callSchema = z
   })
   .strict();
 
-const labeledArgSchema = z.object({ value: z.unknown(), label: z.unknown() }).strict();
-
-function valueSchema(spec: ArgSpec): z.ZodType {
-  switch (spec.kind) {
-    case "sandbox_path":
-      return z.string().min(1).max(256);
-    case "url":
-      return z.string().min(1).max(2048);
-    case "email":
-      return z.email().max(254);
-    case "text":
-      return z.string().max(spec.maxLength ?? 1000);
-    case "count":
-      return z.int().min(1).max(50);
-  }
-}
-
 const EMPTY_DETECTOR: DetectorResult = Object.freeze({ score: 0, hits: Object.freeze([]) });
 
 const has = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
@@ -120,12 +104,23 @@ function failClosed(reason: string, partial: Partial<Decision> = {}): Decision {
   });
 }
 
+// Every Decision object returned by evaluate() is registered here. Execution tickets can only be issued for
+// registered objects, so a hand-built or copied "ALLOW" decision cannot authorise anything.
+const PEP_DECISIONS = new WeakSet<object>();
+
+export function isPepDecision(d: unknown): d is Decision {
+  return typeof d === "object" && d !== null && PEP_DECISIONS.has(d);
+}
+
 export function evaluate(call: unknown, env: PepEnv): Decision {
+  let decision: Decision;
   try {
-    return evaluateUnchecked(call, env);
+    decision = evaluateUnchecked(call, env);
   } catch (e) {
-    return failClosed(`Policy evaluator error: ${(e as Error)?.message ?? "unknown"}`);
+    decision = failClosed(`Policy evaluator error: ${(e as Error)?.message ?? "unknown"}`);
   }
+  PEP_DECISIONS.add(decision);
+  return decision;
 }
 
 function evaluateUnchecked(rawCall: unknown, env: PepEnv): Decision {
@@ -145,37 +140,16 @@ function evaluateUnchecked(rawCall: unknown, env: PepEnv): Decision {
   if (!has(env.users, call.userId)) return failClosed(`Unknown user "${call.userId}"`, meta);
   const user = env.users[call.userId]!;
 
-  const argProvenance: Record<string, Label> = {};
-  const values: Record<string, unknown> = {};
-  for (const name of Object.keys(call.args)) {
-    if (!has(manifest.args, name)) return failClosed(`Unexpected argument "${name}" for ${call.tool}`, meta);
-  }
-  for (const [name, spec] of Object.entries(manifest.args)) {
-    if (!has(call.args, name)) {
-      if (spec.required) return failClosed(`Missing required argument "${name}"`, meta);
-      continue;
-    }
-    const arg = labeledArgSchema.safeParse(call.args[name]);
-    if (!arg.success) return failClosed(`Argument "${name}" is not a labelled value`, meta);
-    const label = parseLabel(arg.data.label);
-    if (!label) return failClosed(`Argument "${name}" has missing or malformed provenance`, meta);
-    if (!valueSchema(spec).safeParse(arg.data.value).success) {
-      return failClosed(`Argument "${name}" failed validation for kind ${spec.kind}`, meta);
-    }
-    argProvenance[name] = label;
-    values[name] = arg.data.value;
-  }
+  const validated = validateArgs(manifest, call.args);
+  if (!validated.ok) return failClosed(validated.reason, meta);
+  const argProvenance: Record<string, Label> = validated.labels;
+  const values: Record<string, unknown> = validated.values;
 
   const contextLabel = parseLabel(call.contextLabel);
   if (!contextLabel) return failClosed("Run context has missing or malformed provenance", { ...meta, argProvenance });
 
-  const callHash = computeCallHash({
-    tool: call.tool,
-    args: Object.fromEntries(Object.keys(values).map((k) => [k, { value: values[k], label: argProvenance[k] }])),
-    runId: call.runId,
-    agentId: call.agentId,
-    policyVersion: policy.policyVersion,
-  });
+  const callHash = bindCallHash(call, policy.policyVersion);
+  if (!callHash) return failClosed("Could not bind call hash", { ...meta, argProvenance });
 
   const untrustedArgText = Object.keys(values)
     .filter((k) => argProvenance[k]!.integrity === "UNTRUSTED" && typeof values[k] === "string")
