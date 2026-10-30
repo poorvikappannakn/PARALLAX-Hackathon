@@ -15,3 +15,10 @@ coverage/
 Thumbs.db
 .idea/
 .vscode/
+
+# AgentShield runtime artefacts (local DB, per-run sandbox copies)
+data/
+*.db
+*.db-wal
+*.db-shm
+server/runtime/
