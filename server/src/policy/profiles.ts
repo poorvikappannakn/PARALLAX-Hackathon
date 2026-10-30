@@ -16,6 +16,16 @@ export interface UserPrincipal {
   readonly clearance: Confidentiality;
 }
 
+/** Human operators authorised to approve high-impact actions. Agents can never appear here. */
+export interface OperatorPrincipal {
+  readonly id: string;
+  readonly displayName: string;
+}
+
+export const OPERATORS: Readonly<Record<string, OperatorPrincipal>> = Object.freeze({
+  "operator:alice": Object.freeze({ id: "operator:alice", displayName: "Alice Rao (approver)" }),
+});
+
 // All identities and domains are synthetic (.test is reserved and never resolves).
 export const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = Object.freeze({
   "agent:research-assistant": Object.freeze({
