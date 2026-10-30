@@ -1,0 +1,11 @@
+# Shield OFF: the same agent, tools, sandbox, gateway and audit run, but policy enforcement is disabled.
+# Structurally invalid calls (unknown tool, malformed args/provenance) are still rejected because
+# there is nothing valid to execute; sandbox containment is enforced by the tools themselves.
+id: agentshield-permissive
+version: "1.0.0"
+mode: permissive
+detector:
+  escalateThreshold: 101   # detector reports scores but never escalates
+approval:
+  ttlSeconds: 300
+rules: []

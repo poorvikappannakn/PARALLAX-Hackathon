@@ -1,0 +1,21 @@
+# AgentShield enforcement policy (Shield ON).
+# Rule logic is implemented deterministically in src/shield/pep.ts; this file must list every rule
+# in the catalogue, otherwise loading fails and every call is denied (fail closed).
+id: agentshield-enforce
+version: "1.0.0"
+mode: enforce
+detector:
+  escalateThreshold: 50   # injection score (0-100) at which A3 escalates; can only make decisions stricter
+approval:
+  ttlSeconds: 300
+rules:
+  - { id: F0,      decision: DENY,             description: "Fail closed on unknown tool, invalid args, malformed provenance, missing policy, invalid approval or evaluator error" }
+  - { id: P1,      decision: DENY,             description: "Tool not in the agent's permission profile" }
+  - { id: P2,      decision: DENY,             description: "Path/URL outside scope, or data classified above min(user clearance, agent ceiling)" }
+  - { id: P3,      decision: DENY,             description: "CONFIDENTIAL or SECRET data (argument or run context) flowing to an external send" }
+  - { id: P4,      decision: DENY,             description: "Target of a high-impact action (recipient, file to delete) comes from untrusted content" }
+  - { id: A1,      decision: REQUIRE_APPROVAL, description: "High-impact action after reading untrusted content, or carrying untrusted data" }
+  - { id: A2,      decision: REQUIRE_APPROVAL, description: "Any other high-impact action requires user confirmation" }
+  - { id: A3,      decision: REQUIRE_APPROVAL, description: "Injection signals detected while untrusted data steers an otherwise allowed call" }
+  - { id: L1,      decision: ALLOW,            description: "Low-impact read within scope and clearance" }
+  - { id: DEFAULT, decision: DENY,             description: "Anything not explicitly allowed is denied" }
