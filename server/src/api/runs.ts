@@ -1,9 +1,25 @@
 import type { Stores } from "../audit/store.js";
 import { decideApproval } from "../gateway/approvals.js";
 import { USERS } from "../policy/profiles.js";
-import type { ScenarioId } from "../scenarios/catalog.js";
-import { createScenarioSession, type ScenarioSession } from "../scenarios/runner.js";
-import { approvalView, runView, type PendingApprovalView, type RunView } from "./views.js";
+import type { LabId, ScenarioId } from "../scenarios/catalog.js";
+import { createLabSession, type LabPlan, type LabSource } from "../scenarios/lab.js";
+import { createScenarioSession, type ScenarioSession, type SessionOptions } from "../scenarios/runner.js";
+import { approvalView, runContentView, runView, type PendingApprovalView, type RunContentView, type RunView } from "./views.js";
+
+export interface AuditExplorerEvent {
+  ts: string;
+  runId: string;
+  scenarioId: string;
+  mode: "on" | "off";
+  seq: number;
+  kind: string;
+  tool: string | null;
+  decision: string | null;
+  ruleId: string | null;
+  outcome: string | null;
+  /** First policy reason of a decision row (already masked by runView). */
+  reason: string | null;
+}
 
 // In-memory registry of interactive runs (M5.3–M5.5).
 //
@@ -23,7 +39,9 @@ export type Subscriber = (e: RunEvent) => void;
 
 export interface RunSummary {
   runId: string;
-  scenarioId: ScenarioId;
+  scenarioId: ScenarioId | LabId;
+  kind: "scenario" | "lab" | "email";
+  title: string;
   mode: "on" | "off";
   state: string;
   createdAt: number;
@@ -84,7 +102,7 @@ export function createRunRegistry(opts: RegistryOptions) {
   const runs = new Map<string, LiveRun>();
   let subscriberCount = 0;
 
-  const currentView = (r: LiveRun): RunView => runView(r.session.report(), r.session.auditEvents());
+  const currentView = (r: LiveRun): RunView => runView(r.session.report(), r.session.auditEvents(), r.session.def);
 
   function emit(r: LiveRun, event: RunEventName, data: unknown) {
     const e: RunEvent = Object.freeze({ id: r.nextId++, event, data });
@@ -190,6 +208,8 @@ export function createRunRegistry(opts: RegistryOptions) {
   const summary = (r: LiveRun): RunSummary => ({
     runId: r.session.runId,
     scenarioId: r.session.scenarioId,
+    kind: r.session.def.id === "LAB" ? "lab" : r.session.def.id === "EMAIL" ? "email" : "scenario",
+    title: r.session.def.title,
     mode: r.session.mode,
     state: r.session.status()?.state ?? "created",
     createdAt: r.createdAt,
@@ -197,16 +217,17 @@ export function createRunRegistry(opts: RegistryOptions) {
     pendingApprovalId: r.session.pendingApprovalId(),
   });
 
-  return {
-    start(scenarioId: ScenarioId, mode: "on" | "off"): { ok: true; run: RunView } | { ok: false; code: "CAPACITY" } {
-      if ([...runs.values()].filter(isLive).length >= maxLive) return { ok: false, code: "CAPACITY" };
-      const session = createScenarioSession(scenarioId, mode, {
-        stores: opts.sessionStores ? opts.sessionStores(opts.stores) : opts.stores,
-        clock: opts.clock,
-        interactive: true,
-        ...(opts.runtimeDir ? { runtimeDir: opts.runtimeDir } : {}),
-      });
-      if (runs.has(session.runId)) throw new Error("Duplicate run id"); // random UUIDs; defensive
+  const sessionOptions = (): SessionOptions => ({
+    stores: opts.sessionStores ? opts.sessionStores(opts.stores) : opts.stores,
+    clock: opts.clock,
+    interactive: true,
+    ...(opts.runtimeDir ? { runtimeDir: opts.runtimeDir } : {}),
+  });
+  const hasCapacity = (n: number) => [...runs.values()].filter(isLive).length + n <= maxLive;
+
+  /** Register and start driving one session (catalogue scenario or lab). */
+  function register(session: ScenarioSession): RunView {
+    if (runs.has(session.runId)) throw new Error("Duplicate run id"); // random UUIDs; defensive
       const r: LiveRun = {
         session,
         createdAt: opts.clock(),
@@ -226,7 +247,60 @@ export function createRunRegistry(opts: RegistryOptions) {
       runs.set(session.runId, r);
       const v = emitChanges(r); // run_started audit row + initial state
       schedule(r);
-      return { ok: true, run: v };
+      return v;
+  }
+
+  return {
+    start(scenarioId: ScenarioId, mode: "on" | "off"): { ok: true; run: RunView } | { ok: false; code: "CAPACITY" } {
+      if (!hasCapacity(1)) return { ok: false, code: "CAPACITY" };
+      return { ok: true, run: register(createScenarioSession(scenarioId, mode, sessionOptions())) };
+    },
+
+    /**
+     * Lab runs: one isolated session (own sandbox, own copy of the content) per requested mode, all with the same task
+     * and content. Capacity is checked for all of them up front.
+     */
+    startLab(task: string, source: LabSource, plan: LabPlan, modes: readonly ("on" | "off")[]): { ok: true; runs: RunView[] } | { ok: false; code: "CAPACITY" } {
+      if (!hasCapacity(modes.length)) return { ok: false, code: "CAPACITY" };
+      return { ok: true, runs: modes.map((m) => register(createLabSession(task, source, plan, m, sessionOptions()))) };
+    },
+
+    /** Untrusted input content of a run, for the inspector. */
+    content(runId: string): RunContentView | null {
+      const r = runs.get(runId);
+      return r ? runContentView(runId, r.session.def, r.session.inspector()) : null;
+    },
+
+    /** Aggregates over the runs held in memory (real decisions only). */
+    overview() {
+      const all = [...runs.values()];
+      const views = all.map(currentView);
+      const decisions = views.flatMap((v) => v.decisions.filter((d) => d.kind === "decision"));
+      return {
+        runs: all.length,
+        live: all.filter((r) => r.session.phase() === "running" || r.session.phase() === "created").length,
+        waiting: all.filter((r) => r.session.phase() === "waiting").length,
+        decisions: {
+          allow: decisions.filter((d) => d.decision === "ALLOW").length,
+          deny: decisions.filter((d) => d.decision === "DENY").length,
+          approval: decisions.filter((d) => d.decision === "REQUIRE_APPROVAL").length,
+        },
+        attacksBlocked: views.filter((v) => v.mode === "on" && v.attack.applicable && v.attack.result === false && v.state !== "waiting").length,
+        attacksSucceeded: views.filter((v) => v.attack.applicable && v.attack.result === true).length,
+      };
+    },
+
+    /** Audit events of all runs held in memory, newest first (allowlisted fields + masked policy reason). */
+    auditExplorer(limit = 500): AuditExplorerEvent[] {
+      const out: AuditExplorerEvent[] = [];
+      for (const r of runs.values()) {
+        const v = currentView(r);
+        const reasons = new Map(v.decisions.map((d) => [d.seq, d.reasons[0] ?? null]));
+        for (const e of v.audit) {
+          out.push({ ts: e.ts, runId: v.runId, scenarioId: v.scenario.id, mode: v.mode, seq: e.seq, kind: e.kind, tool: e.tool, decision: e.decision, ruleId: e.ruleId, outcome: e.outcome, reason: reasons.get(e.seq) ?? null });
+        }
+      }
+      return out.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : b.seq - a.seq)).slice(0, limit);
     },
 
     view(runId: string): RunView | null {

@@ -87,6 +87,21 @@ S2 OFF outbox files contain the fake keys — that is the attack evidence, do no
   (same run completes) → S2 OFF (attack succeeded, live steps) → S2 ON (P2/P4, provenance, masked untrusted path) → approve →
   same run resumes → audit trail → suite (10 runs, 10/10, 3 vs 0); no console errors; no secrets/subjects/paths rendered.
 
+## Labs, inspector, audit explorer (post-M7)
+- **Interactive Attack Lab / Email Security Lab** (`server/src/scenarios/{lab,email,inspector}.ts`, routes in `api/routes.ts`,
+  UI `web/src/{AttackLab,EmailLab,LabResults,Inspector,AuditExplorer}.tsx`). A lab run is a normal session from a server-side
+  definition (`createSessionFromDef`): same agent, user, tools, gateway, PEP, approvals, audit, SSE and capacity as S1–S5. The
+  content is written into that run's own sandbox (web page on the allowlisted host, `public/` document, or the run's inbox)
+  under a server-generated name; tools label it UNTRUSTED. "Compare" = two isolated runs with the same input.
+- **Parser extension** (`agent/instructions.ts`): a fixed named-resource table used only when no explicit path is given
+  ("API keys" → `secrets/api_keys.env`, "salary data" → `hr/salaries.csv`, "project documentation" → the two project
+  files) and `analyzeInstructions()` for the inspector. `parseInstructions()` output for S1–S5 is unchanged (byte-identical
+  CLI/report baseline).
+- **Email parsing**: documented safe subset, no dependency — headers with folding; text/plain or text/html; text-only
+  multipart/alternative|mixed, depth ≤ 2; 7bit/8bit/QP/base64; utf-8/us-ascii/latin1; attachments and anything else rejected.
+- **Task interpretation**: "summarise/report/email me" → read + email summary; "read/review/check" → read only; else 422.
+- **Verification (latest):** backend 23 files, 632 passed, 1 skipped; real-browser workflow A–H passed (see report below).
+
 ## M7 changes
 - **Fix (with regression test):** a gateway halt (fail-closed, e.g. audit write failure) was streamed/shown as `done`; it is now
   `failed` (`api/runs.ts`, test in `api-sse.test.ts`).
@@ -95,6 +110,10 @@ S2 OFF outbox files contain the fake keys — that is the attack evidence, do no
 - Docs: README, API spec, architecture (§2, §6, §8, §11.6), threat model (API rows), plan, this handoff; new demo script and Q&A.
 
 ## Known limitations
+- Labs: the agent recognises only a small documented instruction vocabulary; uploads are UTF-8 text in JSON (non-UTF-8 `.eml`
+  bytes may be decoded lossily by the browser); the email parser is a subset, not full MIME; a "Compare" uses two of the 10
+  run slots; the inspector intentionally shows the untrusted INPUT text (rendered as inert React text, CSP default-src 'none').
+- No frontend unit-test suite; the UI is verified by the real-browser end-to-end script.
 - Simulated agent; regex parser misses other phrasings; coarse provenance for agent-generated values (conservative).
 - In-memory sessions, live runs and pending approvals (lost on restart; approvals then expire). One fixed operator; anyone who
   can read the API console can sign in. Login limit is effectively global on loopback. No `Secure` cookie on plain HTTP.

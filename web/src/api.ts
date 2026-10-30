@@ -1,4 +1,4 @@
-import type { PendingApproval, Run, RunSummary, Scenario, SessionInfo, SuiteResult } from "./types";
+import type { AuditExplorerEvent, EmailSample, LabPlan, Mode, Overview, ParsedEmail, PendingApproval, Run, RunContent, RunSummary, Scenario, SessionInfo, SuiteResult } from "./types";
 
 // Same-origin API client (the Vite dev server proxies /api). The session cookie is HttpOnly; the CSRF token from the
 // session endpoint is sent on every state-changing request.
@@ -45,4 +45,13 @@ export const api = {
   decide: (approvalId: string, verdict: "approve" | "reject") =>
     request<{ run: Run }>("POST", `/api/approvals/${approvalId}/decision`, { verdict }).then((r) => r.run),
   suite: () => request<SuiteResult>("POST", "/api/suite", {}),
+  content: (id: string) => request<{ content: RunContent }>("GET", `/api/runs/${id}/content`).then((r) => r.content),
+  overview: () => request<{ overview: Overview }>("GET", "/api/overview").then((r) => r.overview),
+  audit: () => request<{ events: AuditExplorerEvent[] }>("GET", "/api/audit").then((r) => r.events),
+  labRuns: (body: { task: string; sourceType: "web" | "document"; content: string; filename: string | null; modes: Mode[] }) =>
+    request<{ runs: Run[]; plan: LabPlan }>("POST", "/api/lab/runs", body),
+  emailSamples: () => request<{ samples: EmailSample[] }>("GET", "/api/email/samples").then((r) => r.samples),
+  emailParse: (filename: string, content: string) => request<{ email: ParsedEmail }>("POST", "/api/email/parse", { filename, content }).then((r) => r.email),
+  emailRuns: (body: { task: string; modes: Mode[] } & ({ sampleId: EmailSample["id"] } | { upload: { filename: string; content: string } })) =>
+    request<{ runs: Run[]; plan: LabPlan }>("POST", "/api/email/runs", body),
 };

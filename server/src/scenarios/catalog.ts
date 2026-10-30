@@ -5,7 +5,9 @@ import type { AttackCheck, LegitCheck } from "./verdict.js";
 // and the deterministic NaiveAgent. Operator decisions are SCRIPTED (a stand-in for a human clicking in the M6 UI).
 
 export type ScenarioId = "S1" | "S2" | "S3" | "S4" | "S5";
-export type ScenarioCategory = "legitimate" | "prompt_injection" | "sensitive_data" | "excess_permission" | "fail_closed";
+/** Lab runs (Interactive Attack Lab / Email Security Lab) use the same definition shape; never in the catalogue. */
+export type LabId = "LAB" | "EMAIL";
+export type ScenarioCategory = "legitimate" | "prompt_injection" | "sensitive_data" | "excess_permission" | "fail_closed" | "lab";
 
 /** What the scripted operator does with an approval request. */
 export type OperatorAction = "approve" | "reject" | "timeout";
@@ -25,7 +27,7 @@ export interface Expectation {
 }
 
 export interface ScenarioDef {
-  readonly id: ScenarioId;
+  readonly id: ScenarioId | LabId;
   readonly title: string;
   readonly category: ScenarioCategory;
   readonly description: string;
@@ -40,6 +42,8 @@ export interface ScenarioDef {
   readonly expect: { readonly on: Expectation; readonly off: Expectation };
   /** Fixed explanation of what the expected outcome assumes (shown next to it in the UI). */
   readonly expectationNote?: string;
+  /** Labs only: show the documents read via read_file in the content inspector (they are the supplied untrusted input). */
+  readonly inspectFiles?: boolean;
 }
 
 const S1: ScenarioDef = {

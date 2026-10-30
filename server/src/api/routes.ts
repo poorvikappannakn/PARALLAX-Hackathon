@@ -2,6 +2,8 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import { OPERATORS } from "../policy/profiles.js";
 import { SCENARIO_IDS } from "../scenarios/catalog.js";
+import { EMAIL_SAMPLES, parseEmailUpload } from "../scenarios/email.js";
+import { interpretTask, validateLabContent, type LabSource } from "../scenarios/lab.js";
 import type { AppContext } from "./app.js";
 import { sendError } from "./errors.js";
 import type { RunEvent } from "./runs.js";
@@ -21,6 +23,26 @@ const startRunBody = z.object({ scenarioId: z.enum(SCENARIO_IDS as unknown as [s
 const decisionBody = z.object({ verdict: z.enum(["approve", "reject"]) }).strict();
 const approvalsQuery = z.object({ status: z.literal("pending").optional() }).strict();
 const emptyBody = z.object({}).strict();
+const auditQuery = z.object({}).strict();
+
+/** Route-specific limit for lab uploads: 100 KB of content plus JSON overhead (escaping can grow text, so allow 3×). */
+export const LAB_ROUTE_BODY_LIMIT = 320 * 1024;
+const modes = z.array(z.enum(["on", "off"])).min(1).max(2);
+const labTask = z.string().min(3).max(300);
+const labRunBody = z
+  .object({
+    task: labTask,
+    sourceType: z.enum(["web", "document"]),
+    content: z.string().min(1).max(110_000),
+    filename: z.string().max(100).nullable().optional(),
+    modes,
+  })
+  .strict();
+const emailUploadBody = z.object({ filename: z.string().min(1).max(100), content: z.string().min(1).max(110_000) }).strict();
+const emailRunBody = z.union([
+  z.object({ task: labTask, modes, sampleId: z.enum(["vendor-legit", "vendor-injection", "docs-deletion"]) }).strict(),
+  z.object({ task: labTask, modes, upload: emailUploadBody }).strict(),
+]);
 const runParams = z.object({ runId: z.string().regex(RUN_ID) }).strict();
 const approvalParams = z.object({ approvalId: z.string().regex(APPROVAL_ID) }).strict();
 
@@ -164,6 +186,69 @@ export function registerRoutes(app: FastifyInstance, ctx: AppContext) {
     if (sub.finished) return close();
     heartbeat = setInterval(() => open && out.write(": ping\n\n"), ctx.sseHeartbeatMs);
     heartbeat.unref();
+  });
+
+  // ---- inspector, overview, audit explorer --------------------------------------------------------------------------
+  app.get("/api/runs/:runId/content", async (req, reply) => {
+    const p = runParams.safeParse(req.params);
+    if (!p.success) return notFound(reply);
+    const c = ctx.registry.content(p.data.runId);
+    return c ? { content: c } : notFound(reply);
+  });
+
+  app.get("/api/overview", async () => ({ overview: ctx.registry.overview() }));
+
+  app.get("/api/audit", async (req, reply) => {
+    if (!auditQuery.safeParse(req.query).success) return badRequest(reply);
+    return { events: ctx.registry.auditExplorer() };
+  });
+
+  // ---- Interactive Attack Lab and Email Security Lab ----------------------------------------------------------------
+  // Bounded uploads arrive as JSON text (≤ 100 KB of content) on these routes only; the global 1 KB limit is unchanged.
+  // The client never supplies labels, identities, paths or permissions: the server places the content in a fresh run
+  // sandbox under its own name and the existing tools label it UNTRUSTED.
+  const labLimits = { bodyLimit: LAB_ROUTE_BODY_LIMIT };
+
+  const startLab = (reply: FastifyReply, task: string, source: LabSource, modes: readonly ("on" | "off")[]) => {
+    const plan = interpretTask(task, source.type);
+    if (!plan.ok) return sendError(reply, 422, "TASK_NOT_RECOGNISED", plan.reason);
+    const res = ctx.registry.startLab(task, source, plan.plan, [...new Set(modes)]);
+    if (!res.ok) return sendError(reply, 429, "CAPACITY", "Too many active runs; wait for one to finish");
+    return reply.code(201).send({ runs: res.runs, plan: plan.plan });
+  };
+
+  app.post("/api/lab/runs", labLimits, async (req, reply) => {
+    const body = labRunBody.safeParse(req.body);
+    if (!body.success) return badRequest(reply);
+    const content = validateLabContent(body.data.content, body.data.filename ?? null);
+    if (!content.ok) return sendError(reply, 422, "INVALID_CONTENT", content.reason);
+    return startLab(reply, body.data.task, { type: body.data.sourceType, content: content.content, filename: content.filename }, body.data.modes);
+  });
+
+  app.get("/api/email/samples", async () => ({ samples: EMAIL_SAMPLES }));
+
+  app.post("/api/email/parse", labLimits, async (req, reply) => {
+    const body = emailUploadBody.safeParse(req.body);
+    if (!body.success) return badRequest(reply);
+    const parsed = parseEmailUpload(body.data.filename, body.data.content);
+    return parsed.ok ? { email: parsed.email } : sendError(reply, 422, "INVALID_EMAIL", parsed.reason);
+  });
+
+  app.post("/api/email/runs", labLimits, async (req, reply) => {
+    const body = emailRunBody.safeParse(req.body);
+    if (!body.success) return badRequest(reply);
+    const d = body.data;
+    let source: LabSource;
+    if ("sampleId" in d) {
+      const sample = EMAIL_SAMPLES.find((s) => s.id === d.sampleId);
+      if (!sample) return notFound(reply);
+      source = { type: "email", email: sample.email, sampleId: sample.id, filename: null };
+    } else {
+      const parsed = parseEmailUpload(d.upload.filename, d.upload.content);
+      if (!parsed.ok) return sendError(reply, 422, "INVALID_EMAIL", parsed.reason);
+      source = { type: "email", email: parsed.email, sampleId: null, filename: d.upload.filename };
+    }
+    return startLab(reply, d.task, source, d.modes);
   });
 
   // ---- suite (M5.6) -------------------------------------------------------------------------------------------------

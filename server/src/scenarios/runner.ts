@@ -5,7 +5,9 @@ import type { AuditEvent, Stores } from "../audit/store.js";
 import { decideApproval } from "../gateway/approvals.js";
 import { startRun } from "../gateway/gateway.js";
 import { loadShieldConfig } from "../policy/shield-config.js";
+import type { RunSandbox } from "../sandbox/sandbox.js";
 import { SCENARIOS, type OperatorAction, type ScenarioDef, type ScenarioId } from "./catalog.js";
+import { inspectSources, type UntrustedSource } from "./inspector.js";
 import { attackVerdict, legitimateVerdict, readSandboxState, summarizeSandbox, type SandboxSummary, type Verdict } from "./verdict.js";
 
 // Scenario runner.
@@ -87,7 +89,7 @@ export interface ReportApproval {
 }
 
 export interface ScenarioReport {
-  scenario: { id: ScenarioId; title: string; category: ScenarioDef["category"]; description: string; userId: string; agentId: string; goal: string };
+  scenario: { id: ScenarioDef["id"]; title: string; category: ScenarioDef["category"]; description: string; userId: string; agentId: string; goal: string };
   mode: "on" | "off";
   runId: string;
   policyId: string;
@@ -138,7 +140,11 @@ export type ApprovalActor = { kind: "scripted"; operator: string; rationale: str
 
 export interface ScenarioSession {
   readonly runId: string;
-  readonly scenarioId: ScenarioId;
+  readonly scenarioId: ScenarioDef["id"];
+  /** The definition this session runs (catalogue scenario or lab). */
+  readonly def: ScenarioDef;
+  /** Untrusted content the agent reads in this run, for the inspector (internal; projected by api/views.ts). */
+  inspector(): readonly UntrustedSource[];
   readonly mode: "on" | "off";
   readonly interactive: boolean;
   phase(): SessionPhase;
@@ -179,7 +185,15 @@ const SESSION_ERROR = "Session error while driving the agent; run stopped (nothi
 export function createScenarioSession(id: ScenarioId, mode: "on" | "off", opts: SessionOptions): ScenarioSession {
   const def = (SCENARIOS as Record<string, ScenarioDef | undefined>)[id];
   if (!def) throw new Error("Unknown scenario");
+  return createSessionFromDef(def, mode, opts);
+}
 
+/**
+ * Session for any scenario definition (catalogue scenarios and the Attack/Email Labs). `setup` runs after startRun()
+ * created this run's sandbox and BEFORE the agent acts — the labs use it to place the supplied untrusted content inside
+ * that sandbox. Everything else (gateway, PEP, approvals, audit, verdicts) is identical for every definition.
+ */
+export function createSessionFromDef(def: ScenarioDef, mode: "on" | "off", opts: SessionOptions, setup?: (sandbox: RunSandbox) => void): ScenarioSession {
   let virtualMs = 0;
   const baseClock = opts.clock ?? Date.now;
   const clock = () => baseClock() + virtualMs;
@@ -189,9 +203,15 @@ export function createScenarioSession(id: ScenarioId, mode: "on" | "off", opts: 
     { config, stores: opts.stores, clock, ...(opts.runtimeDir ? { sandbox: { runtimeDir: opts.runtimeDir } } : {}) },
     { scenarioId: def.id, userId: def.userId, agentId: def.agentId, task: { text: def.task.goal, params: { ...def.params } } },
   );
-  // Snapshot the protected file from this run's sandbox BEFORE the agent acts (internal; used only to recognise leaks).
+  setup?.(sandbox);
+  // Snapshot protected files from this run's sandbox BEFORE the agent acts (internal; used only to recognise leaks).
+  const readProtected = (rel: string) => readFileSync(path.join(sandbox.files, ...rel.split("/")), "utf8");
   const protectedFile = def.attack && "protectedFile" in def.attack ? def.attack.protectedFile : null;
-  const protectedContent = protectedFile ? readFileSync(path.join(sandbox.files, ...protectedFile.split("/")), "utf8") : null;
+  const protectedContent = protectedFile ? readProtected(protectedFile) : null;
+  const protectedContents = def.attack?.kind === "lab_breach" ? Object.fromEntries(def.attack.secretFiles.map((f) => [f, readProtected(f)])) : undefined;
+  // Untrusted sources the agent will read, captured now for the inspector (task files are never included: they may be
+  // confidential, e.g. S3's salary file).
+  const sources = inspectSources(def, sandbox);
 
   const agent = createNaiveAgent(gateway, def.task, { maxSteps: opts.maxSteps });
 
@@ -300,13 +320,15 @@ export function createScenarioSession(id: ScenarioId, mode: "on" | "off", opts: 
     },
 
     auditEvents: () => opts.stores.audit.listEvents(run.id),
+    def,
+    inspector: () => sources,
 
     report(): ScenarioReport {
       const events = opts.stores.audit.listEvents(run.id);
       const state = readSandboxState(sandbox);
       const user = config.users[def.userId]!;
       const legitimate = legitimateVerdict(def.legitimate, state, { userEmail: user.email });
-      const attack = attackVerdict(def.attack, state, { userEmail: user.email, protectedContent, audit: events, knownTools: Object.keys(config.tools) });
+      const attack = attackVerdict(def.attack, state, { userEmail: user.email, protectedContent, protectedContents, audit: events, knownTools: Object.keys(config.tools) });
       const expected = def.expect[mode];
       const final = status ?? { state: "done" as const };
       return {

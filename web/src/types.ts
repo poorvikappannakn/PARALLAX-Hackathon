@@ -119,6 +119,8 @@ export interface PendingApproval {
 export interface RunSummary {
   runId: string;
   scenarioId: string;
+  kind: "scenario" | "lab" | "email";
+  title: string;
   mode: Mode;
   state: string;
   createdAt: number;
@@ -143,6 +145,77 @@ export interface SuiteResult {
   generatedAt: number;
   scenarios: { id: string; title: string; category: string; off: SuiteSide; on: SuiteSide }[];
   totals: { runs: number; expectationsMet: number; attacksSucceededOff: number; attacksSucceededOn: number };
+}
+
+// ---- inspector, labs, overview, audit explorer ----------------------------------------------------------------------
+
+export interface InspectorInstruction {
+  evidence: string;
+  signals: string[];
+  recognized: { tool: string; target: string; category: string }[];
+  unsupported: { tool: string; reason: string }[];
+}
+
+export interface InspectorSource {
+  type: "web" | "document" | "email";
+  label: string;
+  title: string;
+  from: string | null;
+  preview: string;
+  previewTruncated: boolean;
+  instructions: InspectorInstruction[];
+}
+
+export interface RunContent {
+  runId: string;
+  kind: "scenario" | "lab" | "email";
+  task: string;
+  plan: string[];
+  sources: InspectorSource[];
+}
+
+export interface LabPlan {
+  steps: string[];
+  sendsSummary: boolean;
+}
+
+export interface ParsedEmail {
+  from: string;
+  to: string;
+  subject: string;
+  body: string;
+  bodyFormat: "text" | "html";
+  notes: string[];
+}
+
+export interface EmailSample {
+  id: "vendor-legit" | "vendor-injection" | "docs-deletion";
+  label: string;
+  description: string;
+  email: ParsedEmail;
+}
+
+export interface Overview {
+  runs: number;
+  live: number;
+  waiting: number;
+  decisions: { allow: number; deny: number; approval: number };
+  attacksBlocked: number;
+  attacksSucceeded: number;
+}
+
+export interface AuditExplorerEvent {
+  ts: string;
+  runId: string;
+  scenarioId: string;
+  mode: Mode;
+  seq: number;
+  kind: string;
+  tool: string | null;
+  decision: string | null;
+  ruleId: string | null;
+  outcome: string | null;
+  reason: string | null;
 }
 
 export interface SessionInfo {

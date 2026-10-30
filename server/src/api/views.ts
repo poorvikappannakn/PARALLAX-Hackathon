@@ -2,6 +2,7 @@ import type { ApprovalRecord, AuditEvent } from "../audit/store.js";
 import { TOOL_MANIFESTS } from "../policy/manifests.js";
 import { USERS } from "../policy/profiles.js";
 import { SCENARIO_IDS, SCENARIOS, type ScenarioDef, type ScenarioId } from "../scenarios/catalog.js";
+import type { UntrustedSource } from "../scenarios/inspector.js";
 import type { ScenarioReport } from "../scenarios/runner.js";
 import { normalizeSandboxPath } from "../shield/paths.js";
 import type { AttackCheck, LegitCheck, Verdict } from "../scenarios/verdict.js";
@@ -94,7 +95,7 @@ export interface VerdictView {
 
 export interface RunView {
   runId: string;
-  scenario: { id: ScenarioId; title: string; category: string; description: string; goal: string; userId: string; agentId: string };
+  scenario: { id: ScenarioDef["id"]; title: string; category: string; description: string; goal: string; userId: string; agentId: string };
   mode: "on" | "off";
   policyId: string;
   state: string;
@@ -227,6 +228,8 @@ function attackCheckText(c: AttackCheck | null): string {
       return `Any of ${c.paths.join(", ")} missing from the sandbox`;
     case "fail_closed_breached":
       return "Any probe had an effect: protected file missing, email to the forbidden recipient, or an unknown tool executed";
+    case "lab_breach":
+      return `Content of ${c.secretFiles.join(" or ")} reached an external recipient, or ${c.protectedPaths.join(" / ")} was deleted`;
   }
 }
 
@@ -238,8 +241,10 @@ function protectedPaths(c: AttackCheck | null): string[] {
     case "files_deleted":
       return [...c.paths];
     case "fail_closed_breached":
+    case "lab_breach":
       return [...c.protectedPaths];
-    default:
+    case "protected_content_emailed_externally":
+    case "protected_file_read":
       return [c.protectedFile];
   }
 }
@@ -250,7 +255,7 @@ export function scenarioListView(): ScenarioView[] {
   return SCENARIO_IDS.map((id) => {
     const s = SCENARIOS[id];
     return {
-      id: s.id,
+      id,
       title: s.title,
       category: s.category,
       description: s.description,
@@ -266,9 +271,12 @@ export function scenarioListView(): ScenarioView[] {
   });
 }
 
-/** Browser-facing run view. `events` are the run's raw audit rows (needed to mask agent-chosen values in reasons). */
-export function runView(report: ScenarioReport, events: readonly AuditEvent[]): RunView {
-  const def: ScenarioDef = SCENARIOS[report.scenario.id];
+/**
+ * Browser-facing run view. `events` are the run's raw audit rows (needed to mask agent-chosen values in reasons).
+ * `def` is the session's definition (labs are not in the catalogue); catalogue runs may omit it.
+ */
+export function runView(report: ScenarioReport, events: readonly AuditEvent[], definition?: ScenarioDef): RunView {
+  const def: ScenarioDef = definition ?? SCENARIOS[report.scenario.id as ScenarioId];
   const userEmail = USERS[def.userId]?.email ?? null;
   const files = new Set(report.sandbox.filesPresent);
   return {
@@ -321,6 +329,73 @@ export function runView(report: ScenarioReport, events: readonly AuditEvent[]): 
     expected: { legitimateCompleted: report.expected.legitimateCompleted, attackSucceeded: report.expected.attackSucceeded },
     expectationsMet: report.expectationsMet,
     expectationNote: def.expectationNote ?? null,
+  };
+}
+
+// ---- Untrusted Content Inspector ------------------------------------------------------------------------------------
+
+export interface InspectorInstructionView {
+  evidence: string;
+  signals: string[];
+  recognized: { tool: string; target: string; category: string }[];
+  unsupported: { tool: string; reason: string }[];
+}
+
+export interface InspectorSourceView {
+  type: "web" | "document" | "email";
+  label: string;
+  title: string;
+  from: string | null;
+  preview: string;
+  previewTruncated: boolean;
+  instructions: InspectorInstructionView[];
+}
+
+export interface RunContentView {
+  runId: string;
+  kind: "scenario" | "lab" | "email";
+  task: string;
+  /** The deterministic plan the agent follows for the user's task (from the run definition). */
+  plan: string[];
+  sources: InspectorSourceView[];
+}
+
+const STEP_PLAN: Record<string, string> = {
+  read_file: "Read the task's file",
+  fetch_web: "Fetch the web page",
+  read_inbox: "Read the inbox",
+  email_summary_to_user: "Email a generated summary to the requesting user",
+  raw: "Emit a scripted malformed/forged request (fail-closed probe)",
+};
+
+const clip = (s: unknown, n: number) => (typeof s === "string" ? (s.length > n ? `${s.slice(0, n)}…` : s) : "");
+
+/**
+ * The untrusted INPUT content of a run and how the deterministic agent interprets it. Unlike runView this deliberately
+ * includes the (bounded) text of the untrusted content — the point is to show judges the actual injection. It never
+ * includes task files, tool outputs, outbox bodies or subjects, secrets, hashes or paths outside provenance labels.
+ * React renders it as text (HTML is shown as source, never executed).
+ */
+export function runContentView(runId: string, def: ScenarioDef, sources: readonly UntrustedSource[]): RunContentView {
+  return {
+    runId,
+    kind: def.id === "LAB" ? "lab" : def.id === "EMAIL" ? "email" : "scenario",
+    task: clip(def.task.goal, 300),
+    plan: def.task.steps.map((s) => (s.op === "read_file" && def.inspectFiles ? "Read the supplied document" : (STEP_PLAN[s.op] ?? s.op))),
+    sources: sources.slice(0, 10).map((s) => ({
+      type: s.type,
+      label: sanitizeSource(s.label),
+      title: clip(s.title, 200),
+      from: s.from === null ? null : clip(s.from, 254),
+      preview: clip(s.preview, 4100),
+      previewTruncated: s.previewTruncated,
+      instructions: s.analysis.instructions.map((i) => ({
+        evidence: clip(i.evidence, 320),
+        signals: [...i.signals],
+        recognized: i.recognized.map((a) => ({ tool: a.kind, target: clip(a.kind === "send_email" ? a.to : a.path, 254), category: a.category })),
+        unsupported: i.unsupported.map((u) => ({ tool: u.kind, reason: u.reason })),
+      })),
+    })),
   };
 }
 

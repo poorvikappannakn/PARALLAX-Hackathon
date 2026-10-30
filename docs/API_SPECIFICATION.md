@@ -21,6 +21,16 @@ bodies or subjects, document contents, secrets, hashes or filesystem paths.
 | GET | `/approvals?status=pending` | session | — | `{ approvals: PendingApprovalView[] }` (approvals of live runs only) |
 | POST | `/approvals/:approvalId/decision` | session + CSRF | `{ verdict: "approve"\|"reject" }` (strict) | 200 `{ run: RunView }` (the same run resumes) · 404 · 409 `CONFLICT` / `APPROVAL_EXPIRED` · 403 · 500 `AUDIT_FAILURE` |
 | POST | `/suite` | session + CSRF | `{}` | `SuiteResult` (all scenarios × both modes, scripted operator) · 409 `SUITE_RUNNING` |
+| GET | `/runs/:runId/content` | session | — | `{ content: RunContentView }` — task, deterministic plan, untrusted sources (bounded inert text preview + per-sentence analysis). Never task files, outbox bodies or secrets |
+| GET | `/overview` | session | — | `{ overview: { runs, live, waiting, decisions: {allow, deny, approval}, attacksBlocked, attacksSucceeded } }` |
+| GET | `/audit` | session | — | `{ events: AuditExplorerEvent[] }` (≤ 500, newest first; masked reasons) |
+| POST | `/lab/runs` | session + CSRF, body ≤ 320 KB | `{ task, sourceType: "web"\|"document", content (≤ 100 KB text), filename?, modes: ["off"\|"on", …] }` | 201 `{ runs: RunView[], plan }` · 422 `INVALID_CONTENT` / `TASK_NOT_RECOGNISED` · 429 |
+| GET | `/email/samples` | session | — | `{ samples: EmailSample[] }` (3 synthetic emails) |
+| POST | `/email/parse` | session + CSRF, body ≤ 320 KB | `{ filename (.eml/.txt/.html), content }` | `{ email }` · 422 `INVALID_EMAIL` (fixed reason) |
+| POST | `/email/runs` | session + CSRF, body ≤ 320 KB | `{ task, modes, sampleId }` or `{ task, modes, upload: { filename, content } }` | 201 `{ runs, plan }` · 422 · 429 |
+
+Lab requests never carry labels, identities, paths or permissions (strict schemas reject them); the server writes the
+content into each run's own sandbox under a generated name and the existing tools label it UNTRUSTED.
 
 The approver is always the authenticated session's operator (`operator:alice`); a client-supplied identity is rejected (400).
 Decisions are persisted by `decideApproval()` (M3) and executed only through the run's own gateway after PEP re-evaluation.

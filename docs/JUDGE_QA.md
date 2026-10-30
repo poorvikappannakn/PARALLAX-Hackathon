@@ -50,6 +50,18 @@ A random 32-byte secret printed once by the API at startup → HttpOnly, SameSit
 token on every state-changing request; Host and Origin allowlists (DNS-rebinding/CSRF defence); JSON-only bodies ≤ 1 KB;
 10 login attempts/min; loopback-only bind. It is a single local operator — not a multi-user identity system.
 
+**Can I try my own attack?**
+Yes — the Interactive Attack Lab (web page or document, typed or `.txt`/`.html` upload ≤ 100 KB) and the Email Security Lab
+(three samples or an uploaded `.eml`/`.txt`/`.html`). The content is written into a fresh sandbox per run and read by the
+same agent through the same policy engine. The agent recognises a small documented vocabulary: read/open/cat, send/email/
+forward, delete/remove/erase with an explicit path or address, plus named resources ("API keys", "salary data", "project
+documentation"). The inspector shows what was recognised and what was unsupported; unsupported instructions do nothing.
+Tasks are interpreted the same way (summarise/report → read + email summary; read/review → read only; anything else refused).
+
+**Does the email's sender or subject matter?**
+No. Sender, recipient and subject are display data; the whole message is labelled UNTRUSTED by the inbox tool, and an email
+cannot grant permissions, approve anything or change the user's task.
+
 **Is the agent an LLM?**
 No. It is a deterministic, deliberately gullible rule-based agent with a regex instruction parser, so the demo is reproducible
 and needs no API key or network. The enforcement layer is agent-agnostic: it never trusts the agent's output, so an LLM agent

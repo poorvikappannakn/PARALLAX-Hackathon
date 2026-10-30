@@ -1,1 +1,86 @@
 @import "tailwindcss";
+
+/* AgentShield design tokens. Surfaces are layered navy/charcoal; cyan is the brand accent; decision colours are fixed:
+   ALLOW = emerald, DENY = rose, REQUIRE_APPROVAL = amber. */
+@theme {
+  --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "Consolas", ui-monospace, monospace;
+
+  --color-ink-950: #060a12;
+  --color-ink-900: #0a101c;
+  --color-ink-850: #0e1524;
+  --color-ink-800: #121b2d;
+  --color-ink-700: #1b2740;
+  --color-ink-600: #263552;
+  --color-line: #1d2a42;
+  --color-line-strong: #2b3c5c;
+  --color-brand: #22d3ee;
+  --color-brand-strong: #06b6d4;
+  --color-brand-blue: #3b82f6;
+
+  --animate-fade-in: fade-in 240ms ease-out both;
+  --animate-pulse-ring: pulse-ring 1.8s ease-out infinite;
+  --animate-indeterminate: indeterminate 1.3s ease-in-out infinite;
+}
+
+@keyframes indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgb(34 211 238 / 0.45);
+  }
+  80%,
+  100% {
+    box-shadow: 0 0 0 8px rgb(34 211 238 / 0);
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    background-color: var(--color-ink-950);
+    background-image:
+      radial-gradient(1200px 600px at 10% -10%, rgb(34 211 238 / 0.07), transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, rgb(59 130 246 / 0.07), transparent 60%);
+    background-attachment: fixed;
+    color: #e2e8f0;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  ::selection {
+    background: rgb(34 211 238 / 0.3);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 1ms !important;
+      transition-duration: 1ms !important;
+    }
+  }
+}

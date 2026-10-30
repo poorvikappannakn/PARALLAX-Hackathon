@@ -7,9 +7,24 @@ Every value the agent handles carries a trust label (where it came from, how sen
 decided **ALLOW / DENY / REQUIRE_APPROVAL** by a deterministic policy engine, with an inspectable reason and an audit record —
 failing closed when policy or provenance is insufficient.
 
-> Status: **M0–M5 complete** — policy engine, gateway, audit, approvals, deterministic simulated agent (not an LLM), five
-> attack/safety scenarios, authenticated API with live SSE, human approval that resumes the same run, and the dashboard.
-> See `HACKATHON_HANDOFF.md`.
+> Status: **judge-ready** — policy engine, gateway, audit, approvals, deterministic simulated agent (not an LLM), five
+> predefined scenarios, an **Interactive Attack Lab**, an **Email Security Lab**, an **Untrusted Content Inspector**, an
+> **Audit Explorer**, authenticated API with live SSE, and human approval that resumes the same run. See `HACKATHON_HANDOFF.md`.
+
+## What a judge can do
+| Page | What it shows |
+|---|---|
+| Overview | Real counts (runs, allowed/denied actions, pending approvals, attacks blocked), the enforcement path, recent denials |
+| Predefined Scenarios | S1–S5 with Shield OFF/ON, live execution, human approval, and the 10-run OFF-vs-ON suite |
+| Interactive Attack Lab | Your own task + your own malicious web page/document (typed or `.txt`/`.html` upload ≤ 100 KB), run OFF and ON side by side |
+| Email Security Lab | Three synthetic emails (legitimate, secret exfiltration, deletion) or an uploaded `.eml`/`.txt`/`.html` (safe parsing subset) |
+| Untrusted Content Inspector | The exact injected sentences, their signals, the tool requests they produced and the PEP decision for each |
+| Audit Explorer | Every audit event of the session's runs, filterable, with masked policy reasons |
+
+Labs use the same agent, policy engine, gateway, sandbox and audit as S1–S5: the supplied content is written into each
+run's own sandbox and labelled UNTRUSTED by the tools. The agent recognises a small documented set of instruction
+patterns (read / send / delete, plus named resources such as "API keys"); everything else is shown as unsupported and
+nothing runs for it.
 
 ## Requirements
 - Node.js 24+ (uses built-in `node:sqlite`), npm 11+. Windows PowerShell supported (use `npm.cmd` if script execution is blocked).
