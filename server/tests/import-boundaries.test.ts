@@ -61,6 +61,33 @@ describe("F3: only the gateway can assemble PEP + ticket issuer + executor", () 
     expect(await restricted("src/tools/probe.ts", 'import { createTicketAuthority } from "../shield/tickets.js"; void createTicketAuthority;')).toBe(true);
   });
 
+  it.each([
+    ['import { startRun } from "../gateway/gateway.js"; void startRun;', "gateway runtime"],
+    ['import { createToolExecutor } from "../tools/index.js"; void createToolExecutor;', "executor"],
+    ['import { TOOL_IMPLS } from "../tools/impl.js"; void TOOL_IMPLS;', "tool impls"],
+    ['import { createTicketAuthority } from "../shield/tickets.js"; void createTicketAuthority;', "tickets"],
+    ['import { evaluate } from "../shield/pep.js"; void evaluate;', "PEP"],
+    ['import { createNaiveAgent } from "../agent/naive-agent.js"; void createNaiveAgent;', "agent runtime"],
+    ['import { parseInstructions } from "../agent/instructions.js"; void parseInstructions;', "agent parser"],
+    ['import { createRunSandbox } from "../sandbox/sandbox.js"; void createRunSandbox;', "sandbox"],
+    ['import { readFileSync } from "node:fs"; void readFileSync;', "filesystem"],
+    ['import { spawn } from "node:child_process"; void spawn;', "child process"],
+  ])("src/api cannot import %s (%s)", async (code) => {
+    expect(await restricted("src/api/probe.ts", code)).toBe(true);
+  });
+
+  it("src/api may use the scenario session, decideApproval, stores, views and gateway/agent TYPES", async () => {
+    for (const code of [
+      'import { createScenarioSession } from "../scenarios/runner.js"; void createScenarioSession;',
+      'import { decideApproval } from "../gateway/approvals.js"; void decideApproval;',
+      'import { createStores } from "../audit/store.js"; void createStores;',
+      'import type { ToolGateway } from "../gateway/gateway.js"; export type G = ToolGateway;',
+      'import type { AgentStatus } from "../agent/naive-agent.js"; export type S = AgentStatus;',
+    ]) {
+      expect(await restricted("src/api/probe.ts", code)).toBe(false);
+    }
+  });
+
   it("the real source tree passes all boundaries", async () => {
     const results = await eslint.lintFiles(["src"]);
     const violations = results.flatMap((r) => r.messages.filter((m) => m.ruleId === "no-restricted-imports").map((m) => `${r.filePath}: ${m.message}`));

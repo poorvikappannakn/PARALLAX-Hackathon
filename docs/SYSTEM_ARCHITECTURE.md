@@ -9,7 +9,7 @@ based on *where each argument came from* (provenance) and *what the action can a
 |---|---|---|
 | User | Alice, clearance `INTERNAL` | Issues tasks |
 | Agent | `agent:research-assistant` | Requests tool calls via `ToolGateway` only |
-| Approver | `operator:alice` (human, UI session — M5/M6; in M4 a **scripted** stand-in, §11.2) | Approves/rejects queued actions |
+| Approver | `operator:alice` — the signed-in human in the dashboard (M5); a **scripted** stand-in in the CLI and suite (§11.2) | Approves/rejects queued actions |
 
 Effective permission = agent profile ∩ user clearance.
 
@@ -45,7 +45,7 @@ flowchart LR
 | `sandbox/` | Per-run sandbox copy and path containment. | M2 |
 | `scenarios/` | Catalogue S1–S5, runner (scripted operator), sandbox-based verdicts. §11. | M4 |
 | `cli/scenarios.ts` | `npm run scenarios` — prints sanitised scenario reports. §11. | M4 |
-| `api/` | Fastify routes, Zod validation, session auth, SSE. | **M5, not started** (only `/api/health` exists in `index.ts`) |
+| `api/` | `buildApp()`, guards, operator sessions, routes, run registry (live execution, human approval, SSE), suite, allowlist views. §8, §11.5–11.6. | M5 |
 
 ## 4. Provenance model
 ```
@@ -93,8 +93,8 @@ Implementation notes (M1, `server/src/shield/pep.ts`):
 ## 6. Approval flow (safeguard 1)
 1. PEP ⇒ REQUIRE_APPROVAL. Gateway computes `callHash = sha256(canonical{tool, args(sorted, LF-normalised, incl. provenance), runId, agentId, userId, policyVersion})`.
 2. Approval row created: `pending`, `expires_at = now + 5 min`, `requester = agentId`.
-3. Human decides via `POST /api/approvals/:id/decision` (approver session + CSRF — **M5, not built yet**; in M4 the scenario
-   runner calls `decideApproval` as a scripted operator, §11.2). `approver != requester` enforced.
+3. Human decides via `POST /api/approvals/:id/decision` (approver session + CSRF, M5.4); the CLI and suite runner call
+   `decideApproval` as a scripted operator instead (§11.2). `approver != requester` enforced.
 4. Gateway **re-invokes the PEP** with `{approval}`. All DENY rules run first and can still deny. An A-rule is satisfied only if
    approval is `approved`, unexpired, unused, and `callHash` matches the recomputed hash (incl. current policy version).
 5. **Atomic consumption** before execution: `UPDATE approvals SET used=1, consumed_at=? WHERE id=? AND used=0 AND status='approved' AND expires_at>? AND call_hash=?`
@@ -177,11 +177,39 @@ The PEP is pure and trusts its inputs. A hijacked agent is exactly our threat, s
   action *did* occur but its outcome is unlogged).
 - Monotonic per-run `seq`. Stretch: hash chain + `/api/audit/verify` (tamper *detection*, not prevention).
 
-## 8. Approver authentication
-- Server startup: random 32-byte operator secret (`crypto.randomBytes`) printed once to the server console.
-- `POST /api/session {secret}` ⇒ `HttpOnly; SameSite=Strict` session cookie + CSRF token; in-memory session store, 12 h expiry.
-- State-changing routes require the cookie and `X-CSRF-Token`; constant-time comparisons.
+## 8. Approver authentication (implemented in M5.2: `server/src/api/{app,session,routes,errors}.ts`)
+- Server startup (`src/index.ts`): random 32-byte operator secret (`crypto.randomBytes`, hex) printed **once** to the console
+  after `listen`; never logged otherwise. `buildApp({db, operatorSecret, port, …})` takes an injected secret for tests.
+- `POST /api/session {secret}` (strict Zod: any other field, e.g. `operatorId`, ⇒ 400). Secrets are compared by hashing both
+  sides to SHA-256 and `timingSafeEqual` (no length leak, no throw). Success ⇒ new random 32-byte session id (base64url) in
+  `as_session=…; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`, body `{operator, csrfToken, expiresAt}`. The session is
+  bound to the configured operator (`operator:alice`, must exist in `OPERATORS`); the client never chooses an identity. A new
+  id is issued on every login and a presented old session is ended (no fixation).
+- **`Secure` is deliberately not set by default**: the demo is plain `http://127.0.0.1`, where browsers drop Secure cookies.
+  `buildApp({secureCookies: true})` adds it when served over HTTPS. Exposure is limited by the loopback-only bind and SameSite.
+- `GET /api/session` ⇒ operator + CSRF token; `DELETE /api/session` (CSRF) ⇒ session destroyed immediately, cookie cleared.
+  Sessions are in memory, expire after 12 h (injectable clock), and malformed/duplicate cookies are treated as no session.
+- Login rate limit: 10 attempts per minute, keyed by the TCP peer address (`trustProxy: false`; `X-Forwarded-For`,
+  `X-Real-IP`, `Forwarded` are never read). On a loopback-only server this is effectively a global limit.
+- Request guards (`onRequest`, in order): **Host** must be `127.0.0.1:<port>` or `localhost:<port>` (DNS-rebinding defence;
+  forwarded host headers ignored) → **Origin**, when present, must be the API's own origin or the Vite dev origin
+  (`http://127.0.0.1:5173`, `http://localhost:5173`); `Sec-Fetch-Site: cross-site` refused → state-changing requests must be
+  `application/json` (POST always; DELETE only if it has a body) else 415 → **session** required for everything except
+  `GET /api/health` and `POST /api/session` (unknown paths too, so routes are not enumerable) → **CSRF**: `X-CSRF-Token` must
+  equal the session's token (constant-time) on every state-changing request except login (no session yet; login is protected
+  by the Origin check and JSON-only bodies, which a cross-site form cannot send without a CORS preflight — CORS is not enabled).
+- Body limit 1 KB (413). Errors are always `{error:{code,message}}` with fixed messages; malformed JSON, prototype poisoning and
+  unexpected fields ⇒ 400 "Malformed request"; nothing user-supplied, no stack traces. Responses carry `Cache-Control: no-store`,
+  `nosniff`, `no-referrer`, `X-Frame-Options: DENY`, `CSP default-src 'none'`.
+- Logging: only method, **matched route pattern** (never the raw path) and status code; no headers, cookies, CSRF tokens,
+  bodies or query strings.
+- Vite dev proxy (`web/vite.config.ts`): `{ target: "http://127.0.0.1:<API port>", changeOrigin: true }` rewrites Host to the
+  API's own host while the browser Origin stays `http://127.0.0.1:<web port>` (allowlisted); `Set-Cookie` passes through.
+  Both ports come from `AGENTSHIELD_API_PORT` / `AGENTSHIELD_WEB_PORT` (defaults 3000 / 5173), read by the API entry point and
+  by the Vite config, so the allowlists and the proxy always agree. Verified live.
 - Agent runs in-process as a distinct principal with no HTTP client, no session-store access; secrets never enter agent context, tool output, logs or audit rows.
+- `src/api/**` may not import the gateway runtime (`startRun`), tools/executor, tickets, the PEP, agent internals, the sandbox
+  or Node fs/child_process/net (ESLint; type-only imports allowed; tested in `tests/import-boundaries.test.ts`).
 
 ## 9. Shield modes
 Shield ON = `policy.yaml`; shield OFF = `policy.permissive.yaml`. Everything else is identical. Each run and audit row records
@@ -246,8 +274,10 @@ sequenceDiagram
   by advancing a virtual clock past the approval TTL. Max 10 approval rounds.
 - **Scripted operator ≠ human approval.** Every approval in a report is `scripted: true` with a rationale, and every report
   carries an operator note. The audit row itself (M3 schema) records `operator:alice` without a scripted flag. In S2–S4 the
-  script approves *everything* it receives (worst case) to show DENY rules hold regardless. M5/M6 replace this with a human
-  approving in the UI through an authenticated session (§8).
+  script approves *everything* it receives (worst case) to show DENY rules hold regardless. Interactive dashboard runs use
+  a human approving through an authenticated session instead (§8, §11.6). S5's Shield ON expectation assumes *no* operator
+  response; its catalogue `expectationNote` (shown in the UI) explains that a human approval of the legitimate status email
+  sends it, so the comparison then reads "not matched" while every probe is still refused.
 - `scenarios/verdict.ts` — verdicts are computed **only from the sandbox end state** (outbox JSON files, files on disk) plus
   gateway-written audit rows (S3 read evidence). The agent trace and claims are never an input. Checks:
   | Scenario | Attack succeeded iff |
@@ -292,5 +322,49 @@ npm run scenarios -w server -- run S4 --json
 npm run scenarios -w server -- run S3 --db data/agentshield.db       # persist runs + audit (git-ignored)
 ```
 From `server/`: `npm run scenarios -- <args>`. Exit code 0 = all expectations met, 1 = not met / run error, 2 = usage error.
+
+### 11.6 Live runs, human approval, SSE and suite (M5.3–M5.6; `server/src/api/{runs,routes,suite}.ts`)
+- **Run registry** (`runs.ts`): one `createScenarioSession()` per `POST /api/runs`, kept in memory. It executes **one gateway call
+  per tick** (`stepDelayMs`, default 700 ms) via the agent's optional call budget (`run(budget)` / `resumeAfterApproval(budget)`;
+  unbounded by default, so `runScenario()`/CLI output is byte-identical) — browsers therefore see each step as it happens.
+  At most 10 live/waiting runs (429 `CAPACITY`); the 50 most recent finished runs are kept; live or waiting runs are never
+  evicted. A failed session stops the run (`failed` event); nothing is retried.
+- **Human approval** (`POST /api/approvals/:id/decision`): the registry finds the live run paused on that approval, calls
+  `decideApproval(stores, id, <session operator>, verdict, now)` (M3: operator registry, expiry, single decision, audit row in one
+  transaction) and then resumes **the same session**, whose gateway re-evaluates the stored call with the PEP and consumes the
+  approval atomically. Forged/unknown ids ⇒ 404; already decided ⇒ 409; expired ⇒ 409 and the run is resumed so the gateway
+  records F0 "expired"; waiting runs whose approval expires are also resumed by a 5 s sweeper. DENY decisions never create
+  approvals, so they cannot be approved.
+- **SSE**: after every tick the registry diffs the run's `runView()` (the same allowlist projection as `GET /api/runs/:id`) and
+  emits `step` / `decision` / `audit` / `state` / `approval_required` (`approvalView()`) / `done` / `failed` with strictly
+  increasing per-run ids into a bounded 500-event buffer; `Last-Event-ID` replays missed events or falls back to a snapshot.
+- **Suite** (`POST /api/suite`): `runScenario()` for every scenario in both modes (scripted operator, not added to the registry),
+  summarised from `runView()`.
+- **Dashboard** (`web/src`): sign-in, scenario picker with Shield ON/OFF, live run page (timeline, approval panel with Approve /
+  Reject, policy decisions with per-argument provenance, audit trail, sandbox evidence), recent runs, and the ON/OFF suite
+  comparison. It renders only API projections; nothing is mocked.
+
+### 11.5 Scenario session lifecycle (M5.1)
+`createScenarioSession(id, mode, {stores, runtimeDir?, clock?, maxSteps?, interactive?})` owns one run (one `startRun`, one
+gateway, one agent) so a human approval can pause and resume the **same** run. `runScenario()` is the scripted driver on top
+of it (same signature; reports and CLI output verified byte-identical before/after the refactor, ids/timestamps normalised).
+- Phases: `created → running → waiting ⇄ running → finished`, or `failed`. `start()` is callable once. `resume()` is refused
+  (`NOT_STARTED`, `NOT_WAITING`, `BUSY` for re-entrant calls, `ALREADY_RESUMED`, `FAILED`) and, while the approval is still
+  pending and unexpired, returns `APPROVAL_PENDING` **without touching the agent**. Each paused approval id is resumed at most once.
+- The session never decides approvals. The driver decides via `decideApproval()` (scripted operator, or in M5 the
+  session-bound human) and then calls `resume()`, which reaches the M3 gateway path unchanged (PEP re-evaluation, hash binding,
+  atomic consumption, audit). `noteDecision()` only records who decided, for the report.
+- **If the approval is persisted but resuming fails** (an exception in the session or agent; gateway exceptions are already
+  contained by the gateway as `halted`): the session becomes `failed` with status `halted` ("Session error …"), the run status
+  is set to `error`, and the session refuses every further `start`/`resume` — it is **never retried automatically**. Depending on
+  where the failure happened, the approval is either still `approved` but unused (it was never consumed; nothing executed, and it
+  expires) or was consumed inside the gateway transaction together with its audit rows (the audit log then shows exactly what
+  executed). In both cases no second execution is possible: consumption is single-use and the gateway's held call is gone.
+  The report can still be built from the sandbox and audit log.
+- Browser-facing data is produced only by `server/src/api/views.ts` (explicit allowlists): `runView`, `scenarioListView`,
+  `approvalView`. They never include `sandboxDir`, subjects (even trusted task subjects), recipients' addresses (only
+  `requesting_user`/`external`), bodies, hashes, verdict evidence strings, audit `detail`, or agent traces; PEP reasons have
+  every UNTRUSTED argument value masked as `[untrusted value]`; provenance sources and tool names outside known patterns are
+  replaced.
 Output sections: RESULT, AGENT STEPS, POLICY DECISIONS, APPROVALS (SCRIPTED), AUDIT TRAIL, SANDBOX EVIDENCE (incl. the run's
 sandbox directory) and a SUMMARY table for multi-run invocations.

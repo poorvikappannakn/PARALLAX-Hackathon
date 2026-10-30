@@ -19,6 +19,29 @@ export default tseslint.config(
     rules: { "no-restricted-imports": ["error", { patterns: [TOOL_IMPL, EXECUTION] }] },
   },
   {
+    // The HTTP API drives runs only through the scenario session abstraction and narrow persistence functions. It cannot
+    // start gateway runs itself, run tools, mint tickets, evaluate policy, touch the sandbox or reach agent internals
+    // (raw traces). Type-only imports are allowed where a signature needs them.
+    files: ["src/api/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            TOOL_IMPL,
+            EXECUTION,
+            { group: ["**/tools/**", "**/tools/*.js"], message: "The API must not import tool code." },
+            { group: ["**/gateway/gateway", "**/gateway/gateway.js"], allowTypeImports: true, message: "The API must not start gateway runs; use the scenario session." },
+            { group: ["**/agent", "**/agent/**"], allowTypeImports: true, message: "The API must not reach agent internals or raw traces." },
+            { group: ["**/shield/pep", "**/shield/pep.js"], allowTypeImports: true, message: "The API must not evaluate policy directly." },
+            { group: ["**/sandbox", "**/sandbox/**"], message: "The API must not touch the sandbox." },
+            { group: ["node:child_process", "child_process", "node:fs", "node:fs/promises", "fs", "fs/promises", "node:net"], message: "The API must not perform direct file/process/socket I/O." },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // The gateway is the one place that wires PEP -> audit -> ticket -> executor.
     files: ["src/gateway/**/*.ts"],
     rules: { "no-restricted-imports": ["error", { patterns: [TOOL_IMPL] }] },

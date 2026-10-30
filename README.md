@@ -7,20 +7,29 @@ Every value the agent handles carries a trust label (where it came from, how sen
 decided **ALLOW / DENY / REQUIRE_APPROVAL** by a deterministic policy engine, with an inspectable reason and an audit record —
 failing closed when policy or provenance is insufficient.
 
-> Status: **M2 complete** — provenance model, deterministic policy engine, per-run sandbox, five sandboxed tools and
-> single-use execution tickets are implemented and tested. Gateway, agent, API and dashboard are in progress — see `HACKATHON_HANDOFF.md`.
+> Status: **M0–M5 complete** — policy engine, gateway, audit, approvals, deterministic simulated agent (not an LLM), five
+> attack/safety scenarios, authenticated API with live SSE, human approval that resumes the same run, and the dashboard.
+> See `HACKATHON_HANDOFF.md`.
 
 ## Requirements
 - Node.js 24+ (uses built-in `node:sqlite`), npm 11+. Windows PowerShell supported (use `npm.cmd` if script execution is blocked).
 - No external API keys. No network access needed at runtime.
 
-## Setup
+## Run the demo
 ```powershell
 npm install
-npm test             # server tests
-npm run typecheck
-npm run dev:server   # API on http://127.0.0.1:3000
-npm run dev:web      # dashboard on http://127.0.0.1:5173
+npm run dev:server   # terminal 1: API on http://127.0.0.1:3000 — prints the operator secret once
+npm run dev:web      # terminal 2: dashboard on http://127.0.0.1:5173 — sign in with that secret
+```
+If ports 3000/5173 are taken, set the same variables in **both** terminals, e.g.
+`$env:AGENTSHIELD_API_PORT="3200"; $env:AGENTSHIELD_WEB_PORT="5300"` (the API's Host/Origin allowlists and the Vite proxy
+both read them).
+
+## Check
+```powershell
+npm test                                   # full test suite
+npm run typecheck; npm run lint; npm run build -w web
+npm run scenarios -w server -- run all     # CLI: all scenarios, Shield OFF vs ON
 ```
 
 ## Safety

@@ -38,6 +38,8 @@ export interface ScenarioDef {
   readonly legitimate: LegitCheck | null;
   readonly attack: AttackCheck | null;
   readonly expect: { readonly on: Expectation; readonly off: Expectation };
+  /** Fixed explanation of what the expected outcome assumes (shown next to it in the UI). */
+  readonly expectationNote?: string;
 }
 
 const S1: ScenarioDef = {
@@ -184,6 +186,10 @@ const S5: ScenarioDef = {
     on: { legitimateCompleted: false, attackSucceeded: false }, // the status email expires unapproved
     off: { legitimateCompleted: true, attackSucceeded: false }, // no approvals with the shield off; probes still refused
   },
+  expectationNote:
+    "The Shield ON expectation assumes the scripted operator never answers, so the status email's approval expires (F0). " +
+    "In an interactive run a human operator may legitimately approve that email: it is then sent once and the legitimate " +
+    "task completes, so the comparison shows \"not matched\" — every malformed or forged probe is still refused either way.",
 };
 
 export const SCENARIOS: Readonly<Record<ScenarioId, ScenarioDef>> = Object.freeze({ S1, S2, S3, S4, S5 });

@@ -32,6 +32,8 @@ export interface AgentTask {
 
 export type AgentStatus =
   | { state: "done" }
+  /** Paced execution only: the call budget for this invocation is used up and work remains. */
+  | { state: "running" }
   | { state: "waiting"; approvalId: string }
   | { state: "halted"; reason: string }
   | { state: "step_limit"; maxSteps: number };
@@ -53,9 +55,10 @@ export interface TraceEntry {
 
 export interface NaiveAgent {
   /** Run until done, waiting for approval, halted or out of steps. */
-  run(): AgentStatus;
-  /** After the runner handled the pending approval: resume it through the gateway, then continue. */
-  resumeAfterApproval(): AgentStatus;
+  /** Run until done, waiting, halted or out of steps; with a `budget`, at most that many gateway calls (then `running`). */
+  run(budget?: number): AgentStatus;
+  /** After the runner handled the pending approval: resume it through the gateway, then continue (budget includes the resume). */
+  resumeAfterApproval(budget?: number): AgentStatus;
   status(): AgentStatus;
   trace(): readonly TraceEntry[];
 }
@@ -190,9 +193,15 @@ export function createNaiveAgent(gateway: AgentGateway, task: AgentTask, opts: {
     return null; // ok, denied, rejected, tool_error: a naive agent just carries on
   }
 
-  function loop(): AgentStatus {
+  /**
+   * Process the queue. `budget` caps the gateway calls made in THIS invocation (for paced, live execution); when it is
+   * used up with work remaining, the agent reports `running` and continues on the next run(). Unbounded by default.
+   */
+  function loop(budget = Infinity): AgentStatus {
+    let calls = 0;
     while (queue.length > 0) {
       if (steps >= maxSteps) return (current = { state: "step_limit", maxSteps });
+      if (calls >= budget) return (current = { state: "running" });
       const next = queue.shift()!;
       const p = "op" in next ? toPending(next) : fromInstruction(next.injected, next.source);
       if (p.origin === "injected") {
@@ -201,18 +210,24 @@ export function createNaiveAgent(gateway: AgentGateway, task: AgentTask, opts: {
         attempted.add(key);
       }
       steps++;
+      calls++;
       const stop = handle(p, "request", gateway.request(p.request));
       if (stop) return (current = stop);
     }
     return (current = { state: "done" });
   }
 
+  let started = false;
   return Object.freeze({
-    run(): AgentStatus {
-      if (current.state !== "done" || trace.length > 0) return current; // run once; use resumeAfterApproval to continue
-      return loop();
+    run(budget?: number): AgentStatus {
+      // First call starts; later calls only continue a budget-paused ("running") agent. Never restarts.
+      if (!started) {
+        started = true;
+        return loop(budget);
+      }
+      return current.state === "running" ? loop(budget) : current;
     },
-    resumeAfterApproval(): AgentStatus {
+    resumeAfterApproval(budget?: number): AgentStatus {
       if (current.state !== "waiting" || !waitingOn) return current;
       if (steps >= maxSteps) return (current = { state: "step_limit", maxSteps });
       const { approvalId, pending } = waitingOn;
@@ -220,7 +235,7 @@ export function createNaiveAgent(gateway: AgentGateway, task: AgentTask, opts: {
       steps++;
       const stop = handle(pending, "resume", gateway.resume(approvalId));
       if (stop) return (current = stop);
-      return loop();
+      return loop(budget === undefined ? undefined : budget - 1);
     },
     status: () => current,
     trace: () => trace.slice(),

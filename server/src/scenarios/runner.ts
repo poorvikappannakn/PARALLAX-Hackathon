@@ -126,11 +126,12 @@ function auditView(e: AuditEvent): ReportAuditEvent {
 // Session
 // ---------------------------------------------------------------------------------------------------------------------
 
+/** "running" = executing, or (paced runs) paused between gateway calls with work remaining. */
 export type SessionPhase = "created" | "running" | "waiting" | "finished" | "failed";
 
 export type SessionResult =
   | { ok: true; status: AgentStatus }
-  | { ok: false; code: "ALREADY_STARTED" | "NOT_STARTED" | "NOT_WAITING" | "APPROVAL_PENDING" | "ALREADY_RESUMED" | "BUSY" | "FAILED" };
+  | { ok: false; code: "ALREADY_STARTED" | "NOT_STARTED" | "NOT_RUNNING" | "NOT_WAITING" | "APPROVAL_PENDING" | "ALREADY_RESUMED" | "BUSY" | "FAILED" };
 
 /** Who decided an approval, as recorded in the report (the gateway/audit record the approver id independently). */
 export type ApprovalActor = { kind: "scripted"; operator: string; rationale: string } | { kind: "human"; operator: string };
@@ -145,13 +146,15 @@ export interface ScenarioSession {
   status(): AgentStatus | null;
   /** The approval the run is currently paused on, if any. */
   pendingApprovalId(): string | null;
-  /** Run the agent until it finishes or pauses for approval. Callable once. */
-  start(): SessionResult;
+  /** Run the agent until it finishes or pauses for approval (or, with `budget`, for at most that many calls). Callable once. */
+  start(budget?: number): SessionResult;
+  /** Continue a budget-paced run (status `running`). */
+  advance(budget?: number): SessionResult;
   /**
    * Continue after the current approval was decided (or expired). Refused while the approval is still pending and
    * unexpired, if this approval was already resumed once, during another start/resume, or after a failure.
    */
-  resume(): SessionResult;
+  resume(budget?: number): SessionResult;
   /** Record who decided the current approval (shown in reports). Call after decideApproval() succeeded. */
   noteDecision(approvalId: string, actor: ApprovalActor, action: OperatorAction): void;
   /** Virtual time, used only by the scripted operator to let an approval expire. */
@@ -200,7 +203,7 @@ export function createScenarioSession(id: ScenarioId, mode: "on" | "off", opts: 
 
   function settle(next: AgentStatus): AgentStatus {
     status = next;
-    phase = next.state === "waiting" ? "waiting" : "finished";
+    phase = next.state === "waiting" ? "waiting" : next.state === "running" ? "running" : "finished";
     if (next.state === "done") {
       try {
         opts.stores.audit.setRunStatus(run.id, "completed", clock());
@@ -243,14 +246,22 @@ export function createScenarioSession(id: ScenarioId, mode: "on" | "off", opts: 
     status: () => status,
     pendingApprovalId: () => (phase === "waiting" && status?.state === "waiting" ? status.approvalId : null),
 
-    start(): SessionResult {
+    start(budget?: number): SessionResult {
       if (busy) return { ok: false, code: "BUSY" };
       if (phase !== "created") return { ok: false, code: phase === "failed" ? "FAILED" : "ALREADY_STARTED" };
       phase = "running";
-      return guarded(() => agent.run());
+      return guarded(() => agent.run(budget));
     },
 
-    resume(): SessionResult {
+    advance(budget?: number): SessionResult {
+      if (busy) return { ok: false, code: "BUSY" };
+      if (phase === "failed") return { ok: false, code: "FAILED" };
+      if (phase === "created") return { ok: false, code: "NOT_STARTED" };
+      if (phase !== "running" || status?.state !== "running") return { ok: false, code: "NOT_RUNNING" };
+      return guarded(() => agent.run(budget));
+    },
+
+    resume(budget?: number): SessionResult {
       if (busy) return { ok: false, code: "BUSY" };
       if (phase === "failed") return { ok: false, code: "FAILED" };
       if (phase === "created") return { ok: false, code: "NOT_STARTED" };
@@ -271,7 +282,7 @@ export function createScenarioSession(id: ScenarioId, mode: "on" | "off", opts: 
       if (pending) return { ok: false, code: "APPROVAL_PENDING" };
       resumed.add(approvalId);
       phase = "running";
-      return guarded(() => agent.resumeAfterApproval());
+      return guarded(() => agent.resumeAfterApproval(budget));
     },
 
     noteDecision(approvalId, actor, action) {
