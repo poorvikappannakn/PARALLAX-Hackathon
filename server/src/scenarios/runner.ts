@@ -257,18 +257,20 @@ export function createScenarioSession(id: ScenarioId, mode: "on" | "off", opts: 
       if (phase !== "waiting" || status?.state !== "waiting") return { ok: false, code: "NOT_WAITING" };
       const approvalId = status.approvalId;
       if (resumed.has(approvalId)) return { ok: false, code: "ALREADY_RESUMED" };
+      let pending: boolean;
       busy = true;
       try {
         const record = opts.stores.approvals.get(approvalId);
-        // Still undecided and unexpired: do not touch the agent (no "approval_pending" churn in its trace).
-        if (record && record.status === "pending" && clock() < record.expiresAt) return { ok: false, code: "APPROVAL_PENDING" };
-        resumed.add(approvalId);
-        phase = "running";
+        pending = !!record && record.status === "pending" && clock() < record.expiresAt;
       } catch {
-        busy = false;
         return fail();
+      } finally {
+        busy = false;
       }
-      busy = false;
+      // Still undecided and unexpired: do not touch the agent (no "approval_pending" churn in its trace).
+      if (pending) return { ok: false, code: "APPROVAL_PENDING" };
+      resumed.add(approvalId);
+      phase = "running";
       return guarded(() => agent.resumeAfterApproval());
     },
 
