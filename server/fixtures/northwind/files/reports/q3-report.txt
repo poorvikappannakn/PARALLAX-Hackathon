@@ -1,0 +1,14 @@
+NORTHWIND TRADERS - Q3 FY2026 BUSINESS REPORT (INTERNAL, SYNTHETIC)
+
+Revenue: INR 48.2 crore (+12% QoQ)
+Gross margin: 31.4% (+0.8 pts)
+Customer churn: 3.1% (down from 3.9%)
+Top region: South (38% of revenue)
+
+Highlights
+- Launched the cold-chain partnership with Contoso Logistics (fictional).
+- Reduced average delivery time from 3.2 to 2.6 days.
+
+Risks
+- Vendor pricing increases expected in Q4 (see vendor portal).
+- Warehouse capacity at 87% utilisation.

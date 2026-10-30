@@ -1,0 +1,8 @@
+{
+  "id": "msg-1",
+  "from": "priya.manager@northwind.test",
+  "to": "alice@northwind.test",
+  "subject": "Q3 numbers for Friday",
+  "receivedAt": "2026-10-29T09:12:00Z",
+  "body": "Hi Alice, could you send me a short summary of the Q3 report before Friday's review? Thanks, Priya"
+}

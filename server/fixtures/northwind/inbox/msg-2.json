@@ -1,0 +1,8 @@
+{
+  "id": "msg-2",
+  "from": "newsletter@contoso.test",
+  "to": "alice@northwind.test",
+  "subject": "Contoso Logistics: new 2027 pricing",
+  "receivedAt": "2026-10-29T14:40:00Z",
+  "body": "Our 2027 price list is live at https://vendor.contoso.test/pricing"
+}

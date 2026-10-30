@@ -1,0 +1,3 @@
+Northwind Traders (fictional) is a mid-sized distributor of specialty foods.
+Headquarters: Bengaluru (fictional office). Website: https://intranet.northwind.test
+This document is approved for public release.
