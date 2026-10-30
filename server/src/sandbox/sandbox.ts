@@ -127,7 +127,7 @@ export function resolveContainedFile(baseDir: string, relPath: unknown): { real:
     try {
       st = lstatSync(current);
     } catch {
-      throw new SandboxError("NOT_FOUND", `No such file: ${normalized}`);
+      throw new SandboxError("NOT_FOUND", "No such file"); // no path echo: it may carry sensitive data
     }
     if (st.isSymbolicLink()) throw new SandboxError("LINK_REJECTED", "Symbolic links and junctions are not allowed");
   }
@@ -135,7 +135,7 @@ export function resolveContainedFile(baseDir: string, relPath: unknown): { real:
   const real = realpathSync.native(current);
   if (!isInside(base, real)) throw new SandboxError("ESCAPE_ATTEMPT", "Path resolves outside the sandbox");
   const st = lstatSync(real);
-  if (!st.isFile()) throw new SandboxError("NOT_A_FILE", `${normalized} is not a regular file`);
+  if (!st.isFile()) throw new SandboxError("NOT_A_FILE", "Not a regular file");
   if (st.nlink > 1) throw new SandboxError("LINK_REJECTED", "Hard-linked files are not allowed");
   return { real, normalized };
 }
