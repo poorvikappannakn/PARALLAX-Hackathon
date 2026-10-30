@@ -9,7 +9,8 @@
     "build": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "test": "vitest run"
+    "test": "vitest run",
+    "scenarios": "tsx src/cli/scenarios.ts"
   },
   "dependencies": {
     "fastify": "^5.12.7",
