@@ -7,12 +7,18 @@ Event: PARALLAX, 30 Oct 16:00 → 31 Oct 16:00 IST. Submissions 14:00–16:00 31
 |---|---|---|
 | M0 | Repo foundation: docs, workspaces, deps, node:sqlite check, smoke tests | COMPLETE |
 | M1 | Security foundation: provenance, classification, manifests, profiles, policy files + loader, PEP (F0–L1), detector, shield ON/OFF config, unit tests | COMPLETE |
-| M2 | Sandbox fixtures + tools (realpath containment, output labelling, single-use ALLOW-ticket check) | NEXT — not started |
-| M3 | Gateway + audit store (fail-closed) + approvals (atomic consume, PEP re-evaluation); gateway owns identities and context label | not started |
+| M2 | Sandbox fixtures, per-run sandbox, 5 tools (realpath containment, output labelling), single-use PEP-issued execution tickets | COMPLETE |
+| M3 | Gateway + audit store (fail-closed) + approvals (atomic consume, PEP re-evaluation); gateway owns identities and context label | NEXT — not started |
 | M4 | NaiveAgent + scenarios S1–S5 + attack regression suite (CLI) | not started |
 | M5 | API (session, runs, SSE, approvals, audit, suite) | not started |
 | M6 | Dashboard: runner + timeline, decision inspector, approvals, audit, scorecard, on/off compare | not started |
 | M7 | Hardening, demo script, README, judge Q&A | not started |
+
+### M3 required security work
+- **[HIGH] Provenance trust boundary:** the gateway sets identities from the run record, owns the grow-only context label, and
+  never accepts labels or identities from agent output (`SYSTEM_ARCHITECTURE.md` §6a).
+- Decision audit row written before a ticket is issued; outcome-write failure halts the run.
+- Approvals consumed atomically, only for re-evaluated `+APPROVED` decisions.
 
 ## Mandatory (MVP)
 1. Deterministic `NaiveAgent` (follows instructions found in content).

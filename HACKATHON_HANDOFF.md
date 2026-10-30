@@ -1,6 +1,6 @@
 # HACKATHON HANDOFF — AgentShield
 
-_Last updated: 2026-10-30, M1 complete and independently reviewed._
+_Last updated: 2026-10-30, M2 complete (uncommitted)._
 
 ## What we are building
 PARALLAX PS-01 AgentShield: a provenance-aware, deterministic policy enforcement point (PEP) between a simulated agent and
@@ -8,56 +8,74 @@ PARALLAX PS-01 AgentShield: a provenance-aware, deterministic policy enforcement
 Deadline: submissions close 31 Oct 16:00 IST; feature freeze 12:00.
 
 ## Approved safeguards (must hold)
-1. Approvals are atomically consumed and bound to hash(tool, canonical args incl. provenance, runId, agentId, policyVersion);
+1. Approvals are atomically consumed and bound to hash(tool, canonical args incl. provenance, runId, agentId, userId, policyVersion);
    the PEP re-evaluates before execution; DENY rules are never overridable.
 2. Audit fails closed: no execution without a decision row; outcome-write failure halts the run (`audit_failure`).
 3. The gateway owns identities and the context label; nothing labels-related is taken from agent output (§6a).
+4. Tools run only with a single-use, call-bound execution ticket issued for a PEP-produced ALLOW decision (§6b).
 
 ## Milestones
 | # | Milestone | Status |
 |---|---|---|
 | M0 | Foundation | COMPLETE (commits d3a5a6d, 4a3f0f4) |
-| M1 | Security foundation | COMPLETE (uncommitted) |
-| M2 | Sandbox fixtures + tools | NEXT — not started, awaiting authorisation |
-| M3–M7 | Gateway/audit/approvals → agent/scenarios → API → dashboard → hardening | not started (see `docs/IMPLEMENTATION_PLAN.md`) |
+| M1 | Security foundation (provenance, policy, PEP) | COMPLETE (commits 82efe41, 257b22e, 5f75f86) |
+| M2 | Sandbox, tools, execution tickets | COMPLETE (uncommitted) |
+| M3 | Gateway + audit + approvals | NEXT — not started, awaiting authorisation |
+| M4–M7 | Agent/scenarios → API → dashboard → hardening | not started (`docs/IMPLEMENTATION_PLAN.md`) |
 
 ## Current code (server/src)
 | File | Purpose |
 |---|---|
-| `index.ts`, `db/sqlite.ts` | Fastify `/api/health` on 127.0.0.1:3000; SQLite opener (WAL, FKs). |
-| `shield/provenance.ts` | `Label`/`Labeled<T>`, strict `parseLabel`, `WORST_CASE_LABEL` (UNTRUSTED+SECRET), `joinLabels` (empty/malformed ⇒ worst case), origins (`fromUser`, `agentLiteral`, `untrusted`), propagation (`copy`, `transform`, `combine`, `generated`, `extendContext`). Labels frozen. |
-| `shield/canonical.ts` | `canonicalJson` (sorted keys, LF, NFC); `computeCallHash`. |
-| `shield/paths.ts` | `normalizeSandboxPath` (rejects traversal, absolute, drive, UNC, ADS, NUL, trailing dot/space, device names, `~`), `isWithinScopes`. Logical only. |
-| `shield/detector.ts` | Heuristic injection scorer (8 patterns, 0–100). Escalate-only. |
-| `shield/rules.ts` | Rule catalogue F0, P1–P4, A1–A3, L1, DEFAULT; `stricter()`. |
-| `shield/pep.ts` | Pure `evaluate(call, env)` → `Decision` (ruleId, matchedRules, reasons, risk, per-arg provenance, context label, detector, callHash, policy version). Checks `ApprovalEvidence`; approvers must be `operator:*`. |
-| `policy/classification.ts` | Path-prefix classification (unclassified ⇒ SECRET); content labels for file/web/email (always UNTRUSTED). |
-| `policy/manifests.ts` | 5 frozen tool manifests: effect, impact, per-argument kind and role (target/data/option). |
-| `policy/profiles.ts` | Agents `agent:research-assistant`, `agent:ops-assistant`; users `user:alice` (INTERNAL), `user:hana` (CONFIDENTIAL). |
-| `policy/policy.yaml`, `policy.permissive.yaml`, `loader.ts`, `shield-config.ts` | Shield ON/OFF. Enforce file must list exactly the catalogue, keep DENY decisions, keep detector enabled; ON refuses a permissive file; failure ⇒ `policy: null` ⇒ every call DENY. Policies deep-frozen. ON/OFF share the same registries. |
+| `index.ts`, `db/sqlite.ts` | Fastify `/api/health` on 127.0.0.1:3000; SQLite opener. |
+| `shield/provenance.ts` | Labels, strict parsing, worst-case default, join, origins, propagation (`copy/transform/combine/generated/extendContext`). |
+| `shield/arg-schema.ts` | Shared strict argument validation (`validateArgs`) used by PEP and tool executor. |
+| `shield/canonical.ts` | `canonicalJson`; `computeCallHash`; `bindCallHash(call, policyVersion)` (binds tool, labelled args, run, agent, user, policy). |
+| `shield/paths.ts` | Logical path normalisation and scope check. |
+| `shield/detector.ts` | Heuristic injection scorer (escalate-only). |
+| `shield/rules.ts` | Rule catalogue and `stricter()`. |
+| `shield/pep.ts` | Pure `evaluate(call, env)` → `Decision`; registers decisions for `isPepDecision`; checks approval evidence (approvers `operator:*`). |
+| `shield/tickets.ts` | `createTicketAuthority({clock, ttlMs})` → `{issuer, redeemer}`; single-use, 30 s, call-bound tickets. |
+| `sandbox/sandbox.ts` | `createRunSandbox`, `destroyRunSandbox`, `resolveContainedFile`, `readContainedFile`, `containedDir`, `isInside`. |
+| `tools/index.ts` | `createToolExecutor(redeemer)` — the only entry point to tools. |
+| `tools/impl.ts` | `read_file`, `fetch_web`, `read_inbox`, `send_email`, `delete_file` (labelled outputs). |
+| `policy/*` | Classification, manifests, profiles, enforce/permissive YAML, loader, shield config. |
 
-## Key M1 decisions
-- A3 escalates ALLOW → REQUIRE_APPROVAL only when detector ≥ threshold **and** an argument is UNTRUSTED.
-- P3 uses max(argument, run-context) confidentiality for every argument of an external send (implicit flows).
-- All content read from the environment (files, web, email) is UNTRUSTED; files take confidentiality from classification.
-- P2 effective clearance = min(user clearance, agent ceiling). URLs: https, exact allow-listed host, no credentials or port.
-- Shield OFF still rejects structurally invalid calls (F0); all policy rules are skipped (`ruleId: OFF`).
+Fixtures: `server/fixtures/northwind/` (synthetic; see its README). Run sandboxes: `server/runtime/runs/<runId>/` (git-ignored).
+
+## Key decisions
+- M1: A3 needs detector ≥ threshold **and** an UNTRUSTED argument; P3 uses max(arg, context) confidentiality; all environment
+  content is UNTRUSTED; P2 clearance = min(user, agent ceiling); Shield OFF still rejects structurally invalid calls.
+- M2: tool outputs join the content label with the selecting arguments' labels; inbox messages labelled individually;
+  receipts TRUSTED PUBLIC. Sandbox containment, URL restrictions (https, `.test`, no port/credentials, local fixtures) and
+  single-line subjects are enforced in tools, independent of policy, so they hold with Shield OFF.
+- M2 changes to M1 code: argument validation moved to `arg-schema.ts` (identical rules); call hash now also binds `userId`;
+  `evaluate()` brands its decisions. All 137 M1 tests still pass unchanged.
 
 ## Verification (latest run)
-`npm test`: 6 files, **137/137 pass** · server + web typecheck clean · ESLint clean · web production build OK.
+`npm test`: 9 files, **213 passed, 1 skipped** (file-symlink test: Windows `EPERM` without Developer Mode; junction and
+hard-link escapes are tested and rejected) · server + web typecheck clean · ESLint clean (boundary rules verified to fire) ·
+web production build OK.
 
-## Open items carried into later milestones
-- M2: real path containment (resolve + realpath + prefix) inside tools; reject CR/LF in email subject when writing the outbox.
-- M3: gateway must own identities and context label (§6a); consume approvals only when `ruleId` ends in `+APPROVED`.
-- Decision objects are shallow-frozen; gateway should treat them as read-only and copy before storing.
+## M3 required security work (from M1/M2 reviews)
+1. **[HIGH — provenance trust boundary]** The PEP and execution tickets trust the identities and labels they are given; a value
+   relabelled TRUSTED is accepted (documented by test `tools.test.ts` › "a forged TRUSTED label…"). The M3 gateway MUST set
+   `runId/agentId/userId` from the run record, maintain the run context label itself from tool outputs (grow-only), and never
+   accept labels or identities from agent/model output (`SYSTEM_ARCHITECTURE.md` §6a, `CLAUDE.md` #11).
+2. Write the decision audit row before issuing a ticket; halt the run if the outcome row fails (safeguard 2).
+3. Consume approvals atomically and only when the re-evaluated decision `ruleId` ends in `+APPROVED` (safeguard 1).
+
+## Accepted low risks
+- Small TOCTOU window between `resolveContainedFile` and `unlink` in `delete_file` (run-local only; local attacker out of scope).
+- Ticket store is in-memory (single-process demo).
 
 ## Notes
-- `node:sqlite` prints an ExperimentalWarning (expected). Use `npm.cmd`/`npx.cmd` in PowerShell.
+- `node:sqlite` ExperimentalWarning is expected. Use `npm.cmd`/`npx.cmd` in PowerShell.
+- `files/secrets/api_keys.env` is a deliberately fake fixture and is intentionally tracked.
 
 ## Failed approaches
-- A test for "evaluator throws" first used a Proxy without a `getOwnPropertyDescriptor` trap, so `hasOwnProperty` bypassed it.
-  The PEP still failed closed; the test was fixed to force a real exception.
+- M1: "evaluator throws" test Proxy lacked a `getOwnPropertyDescriptor` trap (fixed in test).
+- M2: one test passed the page object instead of `html` to `transform` (test bug, fixed).
 
 ## Next task
-M2 (awaiting authorisation): synthetic sandbox fixtures (`server/sandbox/`), per-run sandbox copy, 5 tool implementations with
-realpath containment and output labelling, single-use ALLOW-ticket enforcement.
+M3 (awaiting authorisation): ToolGateway (identities + context label from run state), audit store with fail-closed writes,
+approval store with atomic consumption and PEP re-evaluation, wiring PEP → audit → ticket → executor → audit.

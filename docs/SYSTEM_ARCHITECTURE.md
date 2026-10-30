@@ -107,6 +107,24 @@ The PEP is pure and trusts its inputs. A hijacked agent is exactly our threat, s
 - Approval evidence — from the approval store, consumed only when the decision `ruleId` ends in `+APPROVED`.
 - Approvers must be `operator:*` principals (enforced in the PEP); no agent profile id can approve.
 
+## 6b. Execution tickets and sandbox (M2)
+- `evaluate()` registers every Decision it returns in a private WeakSet (`isPepDecision`). `createTicketAuthority()` returns a
+  separate **issuer** (gateway) and **redeemer** (tool executor). The issuer only accepts PEP-registered `ALLOW` decisions whose
+  `callHash` matches the call; tickets are frozen, registered per authority, expire after 30 s and are consumed on first
+  redemption (a failed redemption also burns the ticket). Redemption recomputes the call hash, so changed arguments, provenance,
+  tool, run, agent or user are rejected. The binding hash now includes `userId`.
+- `createToolExecutor(redeemer)` is the only entry point to tool implementations: redeem ticket → check sandbox belongs to the
+  run → strict argument validation (shared `shield/arg-schema.ts`, same as the PEP) → run tool. ESLint forbids importing
+  `tools/impl` outside `tools/`, and forbids tools from importing the PEP or ticket issuer (type imports only).
+- Per-run sandbox (`sandbox/sandbox.ts`): fixtures `server/fixtures/northwind/` are copied to `server/runtime/runs/<runId>/`
+  (`files/`, `web/`, `inbox/`, `outbox/`). Fixture and copy trees must contain only plain files/dirs (no links, no hard links).
+  File access: logical path check → `lstat` every component (symlinks/junctions rejected) → `realpath` must stay inside →
+  regular file, `nlink == 1` → reads verify the opened handle matches the checked inode.
+- Tool outputs: content label (UNTRUSTED, classification) joined with the labels of the arguments that selected it; inbox
+  messages are labelled individually; send/delete receipts are `TRUSTED PUBLIC tool:<name>`. `fetch_web` only maps https
+  `.test` URLs to local fixture files (no network client exists). `send_email` writes JSON (with per-argument provenance) to the
+  run outbox and rejects multi-line subjects. These checks are independent of policy, so they also hold with Shield OFF.
+
 ## 7. Audit (safeguard 2)
 - Application-level append-only SQLite: no update/delete code paths or routes for `audit_events`. **Not inherently immutable** —
   someone with OS file access can edit the DB; documented in the threat model.
