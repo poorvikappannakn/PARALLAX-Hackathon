@@ -1,7 +1,6 @@
 # HACKATHON HANDOFF — AgentShield
 
-_Last updated: 2026-10-31, M7 complete (judge-ready). Committed: M0–M4 and the M5.1 session refactor (`runner.ts`, HEAD
-43e6f25). Uncommitted at time of writing: `api/views.ts` + M5.1 tests, and all of M5.2–M7._
+_Last updated: 2026-10-31. Committed and pushed: everything up to `87aff7d` (labs, inspector, audit explorer). Uncommitted: the security-analysis layer (advisory content analysis) and URL-risk enforcement for `fetch_web` at the PEP (rules U1/U2, enforce policy 1.1.0) — see "Security analysis and URL-risk enforcement" below._
 
 ## Launch the demo
 ```powershell
@@ -78,7 +77,7 @@ S2 OFF outbox files contain the fake keys — that is the attack evidence, do no
 | S4 inbox → delete | 2 project files deleted (sandbox) | **P1** ×2 denied; files remain |
 | S5 fail-closed | F0 ×4 + rejected ×2; status email sent (no approvals when OFF) | same refusals; unanswered approval → **F0 expired** (a human may instead approve the legitimate email — then "not matched", explained in the UI) |
 
-## Verification (latest run, M7)
+## Verification (M7 — historical)
 - `npm test`: **21 files, 585 passed, 1 skipped** (file-symlink test: Windows `EPERM` without Developer Mode).
   Per M5/M7 file: api-auth 56 · api-runs 32 · api-sse 14 · api-suite 2 · views 18 · scenario-session 8.
 - Server + web typecheck, ESLint, web production build, `git diff --check`: clean. CLI exit codes 0/0/2 (`list`, `run all`, `run S9`).
@@ -100,7 +99,32 @@ S2 OFF outbox files contain the fake keys — that is the attack evidence, do no
 - **Email parsing**: documented safe subset, no dependency — headers with folding; text/plain or text/html; text-only
   multipart/alternative|mixed, depth ≤ 2; 7bit/8bit/QP/base64; utf-8/us-ascii/latin1; attachments and anything else rejected.
 - **Task interpretation**: "summarise/report/email me" → read + email summary; "read/review/check" → read only; else 422.
-- **Verification (latest):** backend 23 files, 632 passed, 1 skipped; real-browser workflow A–H passed (see report below).
+- **Verification (historical — at labs completion, commit `87aff7d`):** backend 23 files, 632 passed, 1 skipped; real-browser workflow A–H passed.
+
+## Security analysis and URL-risk enforcement (post-labs, uncommitted)
+- **Advisory content analysis** (`server/src/analysis/{instruction-threat,url-analyzer,assessment}.ts`): separate source trust /
+  instruction threat / URL risk, evidence-based alerts, outgoing-email content check. Rule-based and offline. The instruction
+  analysis and all content-level results are advisory — the PEP never reads them. Design: `docs/SECURITY_DESIGN.md`.
+  Exposed via `/api/runs/:id/content` (`assessment`, `enforcement`, `outgoing`), `/api/approvals` (`outgoing`) and `/api/audit`
+  (`threat`); UI: `web/src/Assessment.tsx` in the inspector, level badges in the Audit Explorer. Alerts state the real per-run
+  outcome (Shield ON/OFF; executed / denied / awaiting approval).
+- **URL-risk enforcement — `fetch_web` only** (`shield/pep.ts`, `shield/rules.ts`, `policy/policy.yaml` → version **1.1.0**): the PEP
+  re-runs the offline URL analyzer on the URL of each `fetch_web` call (never a client-supplied or earlier result; nothing is
+  fetched or resolved). **HIGH ⇒ U1 DENY** (a DENY rule, never sent for approval, cannot be approved); **MEDIUM ⇒ U2
+  REQUIRE_APPROVAL** (normal approval safeguards); **LOW / UNKNOWN ⇒ existing behaviour** (UNKNOWN adds an advisory reason).
+  P2's exact-host https allowlist still applies first, so e.g. `https://paypa1.com/verify` is denied by P2 (and by U1 if it were
+  ever allow-listed). Shield OFF and other tools are unchanged.
+- **Why a suspicious link in page content does not cause a `fetch_web`:** `fetch_web` only fetches the task's own page (S2's
+  fixture or the lab page on the allow-listed `vendor.contoso.test`), which is UNKNOWN risk ⇒ L1 "Allowed". Links *inside* that
+  content are never requested: the agent's instruction parser has no fetch/visit action. Their risk is shown as **URL risk**
+  in the Security Assessment (advisory), separate from tool decisions.
+- **Tests:** `server/tests/security-analysis.test.ts` (**42**: I1–I13, S5–S7, analyzer URL cases U1–U10 — not the PEP rules —,
+  review regressions, analyzer-LOW-but-PEP-denies, mode-accurate alerts, outgoing check); `server/tests/pep-url-risk.test.ts`
+  (**9**: look-alikes ⇒ P2/U1 DENY, official domains unchanged, UNKNOWN unchanged with warning, MEDIUM ⇒ U2 and approval
+  safeguards, HIGH not overridable by approval, URL swap after approval, Shield OFF permissive, unrelated tools unaffected).
+- **Verification (latest):** backend **25 files, 683 passed, 1 skipped**; typecheck, lint, web build clean. S1–S5 decisions
+  unchanged; S2 ON's `fetch_web` decision carries the new advisory "URL risk UNKNOWN" reason. Browser workflow A–H last passed
+  before the U1/U2 and "URL risk" label changes (re-run before the demo).
 
 ## M7 changes
 - **Fix (with regression test):** a gateway halt (fail-closed, e.g. audit write failure) was streamed/shown as `done`; it is now

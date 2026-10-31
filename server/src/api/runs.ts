@@ -19,6 +19,18 @@ export interface AuditExplorerEvent {
   outcome: string | null;
   /** First policy reason of a decision row (already masked by runView). */
   reason: string | null;
+  /** Advisory threat assessment of the run's untrusted content (separate instruction and URL levels; null = none). */
+  threat: { instruction: string | null; url: string | null; alerts: number };
+}
+
+const RANK: Record<string, number> = { LOW: 0, UNKNOWN: 1, MEDIUM: 2, HIGH: 3 };
+const top = (levels: (string | null)[]) => levels.filter((l): l is string => l !== null).reduce<string | null>((a, b) => (a === null || (RANK[b] ?? 0) > (RANK[a] ?? 0) ? b : a), null);
+function threatOf(c: RunContentView): AuditExplorerEvent["threat"] {
+  return {
+    instruction: top(c.sources.map((x) => x.assessment.instructionThreat.level)),
+    url: top(c.sources.map((x) => x.assessment.urlRisk)),
+    alerts: c.sources.filter((x) => x.assessment.alert !== null).length,
+  };
 }
 
 // In-memory registry of interactive runs (M5.3–M5.5).
@@ -69,6 +81,7 @@ export interface RegistryOptions {
 interface LiveRun {
   session: ScenarioSession;
   createdAt: number;
+  threat?: AuditExplorerEvent["threat"];
   finishedAt: number | null;
   events: RunEvent[];
   nextId: number;
@@ -268,7 +281,9 @@ export function createRunRegistry(opts: RegistryOptions) {
     /** Untrusted input content of a run, for the inspector. */
     content(runId: string): RunContentView | null {
       const r = runs.get(runId);
-      return r ? runContentView(runId, r.session.def, r.session.inspector()) : null;
+      if (!r) return null;
+      const v = currentView(r);
+      return runContentView(runId, r.session.def, r.session.inspector(), { mode: v.mode, steps: v.steps, events: r.session.auditEvents(), userEmail: USERS[r.session.report().scenario.userId]?.email ?? null });
     },
 
     /** Aggregates over the runs held in memory (real decisions only). */
@@ -296,8 +311,10 @@ export function createRunRegistry(opts: RegistryOptions) {
       for (const r of runs.values()) {
         const v = currentView(r);
         const reasons = new Map(v.decisions.map((d) => [d.seq, d.reasons[0] ?? null]));
+        r.threat ??= threatOf(runContentView(v.runId, r.session.def, r.session.inspector()));
+        const threat = r.threat;
         for (const e of v.audit) {
-          out.push({ ts: e.ts, runId: v.runId, scenarioId: v.scenario.id, mode: v.mode, seq: e.seq, kind: e.kind, tool: e.tool, decision: e.decision, ruleId: e.ruleId, outcome: e.outcome, reason: reasons.get(e.seq) ?? null });
+          out.push({ ts: e.ts, runId: v.runId, scenarioId: v.scenario.id, mode: v.mode, seq: e.seq, kind: e.kind, tool: e.tool, decision: e.decision, ruleId: e.ruleId, outcome: e.outcome, reason: reasons.get(e.seq) ?? null, threat });
         }
       }
       return out.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : b.seq - a.seq)).slice(0, limit);

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { IconList, ToolIcon } from "./icons";
+import { LevelBadge } from "./Assessment";
 import type { AuditExplorerEvent } from "./types";
 import { Badge, cx, DecisionChip, Empty, ErrorNote, ModeBadge, Panel, Spinner } from "./ui";
 
@@ -125,6 +126,12 @@ export function AuditExplorer({ onOpenRun }: { onOpenRun: (id: string) => void }
                         <ModeBadge mode={e.mode} />
                         <span className="font-mono text-xs text-slate-500">{e.runId.slice(4, 12)}</span>
                       </button>
+                      {e.threat && (e.threat.instruction || e.threat.url) && (
+                        <div className="mt-1 flex flex-wrap gap-1" title="Advisory content assessment of this run (not a policy decision)">
+                          {e.threat.instruction && <LevelBadge level={e.threat.instruction} label="content" />}
+                          {e.threat.url && <LevelBadge level={e.threat.url} label="URL" />}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-slate-200">{EVENT_LABEL[e.kind] ?? e.kind}</td>
                     <td className="px-4 py-2.5">

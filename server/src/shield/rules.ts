@@ -8,6 +8,8 @@ export const RULE_CATALOG = Object.freeze({
   P2: { decision: "DENY", overridable: false, summary: "Resource out of scope or above effective clearance" },
   P3: { decision: "DENY", overridable: false, summary: "Confidential or secret data flowing to an external send" },
   P4: { decision: "DENY", overridable: false, summary: "High-impact target chosen by untrusted content" },
+  U1: { decision: "DENY", overridable: false, summary: "fetch_web URL has HIGH offline URL risk (deceptive or dangerous)" },
+  U2: { decision: "REQUIRE_APPROVAL", overridable: true, summary: "fetch_web URL has MEDIUM offline URL risk" },
   A1: { decision: "REQUIRE_APPROVAL", overridable: true, summary: "High-impact action influenced by untrusted content" },
   A2: { decision: "REQUIRE_APPROVAL", overridable: true, summary: "High-impact action needs user confirmation" },
   A3: { decision: "REQUIRE_APPROVAL", overridable: true, summary: "Injection signals while untrusted data steers the call" },

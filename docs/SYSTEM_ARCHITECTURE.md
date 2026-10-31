@@ -71,6 +71,8 @@ Same call with `to` extracted from the page ⇒ `to` is UNTRUSTED ⇒ P4 DENY (n
 | P2 🔒 | resource out of scope (path traversal, URL not allowlisted, classification > clearance) | DENY |
 | P3 🔒 | CONFIDENTIAL/SECRET argument → EXTERNAL_SEND sink | DENY |
 | P4 🔒 | UNTRUSTED target sink (`to`, `path`) on HIGH-impact tool | DENY |
+| U1 🔒 | `fetch_web` URL rated HIGH by the offline URL analyzer (recomputed at the PEP) | DENY |
+| U2 | `fetch_web` URL rated MEDIUM by the offline URL analyzer | REQUIRE_APPROVAL |
 | A1 | HIGH-impact + tainted context or UNTRUSTED data sink | REQUIRE_APPROVAL (elevated) |
 | A2 | any other HIGH-impact | REQUIRE_APPROVAL (normal) |
 | A3 | detector ≥ threshold **and** any argument is UNTRUSTED (attacker may be steering an otherwise-allowed call) | escalate ALLOW → REQUIRE_APPROVAL |
@@ -368,3 +370,11 @@ of it (same signature; reports and CLI output verified byte-identical before/aft
   replaced.
 Output sections: RESULT, AGENT STEPS, POLICY DECISIONS, APPROVALS (SCRIPTED), AUDIT TRAIL, SANDBOX EVIDENCE (incl. the run's
 sandbox directory) and a SUMMARY table for multi-run invocations.
+
+## 12. Advisory content analysis (post-M7)
+`server/src/analysis/` holds three pure modules — `instruction-threat.ts`, `url-analyzer.ts`, `assessment.ts` — called by the
+Untrusted Content Inspector (`scenarios/inspector.ts`) for each untrusted source of a run. They produce separate source-trust,
+instruction-threat and URL-risk classifications plus an evidence-based alert, exposed through `GET /api/runs/:id/content`
+(`assessment`) and `GET /api/audit` (`threat`) via explicit allowlist projections. They are not on the tool-call path, with one
+exception: the PEP imports the pure, offline `url-analyzer.ts` and re-evaluates every `fetch_web` URL (U1 DENY on HIGH,
+U2 REQUIRE_APPROVAL on MEDIUM). Details: `docs/SECURITY_DESIGN.md`.

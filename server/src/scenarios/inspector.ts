@@ -1,6 +1,7 @@
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { analyzeInstructions, plainTextPreview, type ContentAnalysis } from "../agent/instructions.js";
+import { assessSource, type SourceAssessment } from "../analysis/assessment.js";
 import type { RunSandbox } from "../sandbox/sandbox.js";
 import type { ScenarioDef } from "./catalog.js";
 
@@ -18,6 +19,8 @@ export interface UntrustedSource {
   preview: string;
   previewTruncated: boolean;
   analysis: ContentAnalysis;
+  /** Source trust, instruction threat and URL threat (separate classifications; advisory only). */
+  assessment: SourceAssessment;
 }
 
 const MAX_BYTES = 100 * 1024;
@@ -38,9 +41,11 @@ function safeRead(base: string, rel: string): string | null {
 const argValue = (def: ScenarioDef, arg: { ref: string } | { value: string }) =>
   "value" in arg ? arg.value : arg.ref.startsWith("task.") ? def.params[arg.ref.slice(5)] : undefined;
 
-function source(type: UntrustedSource["type"], label: string, title: string, from: string | null, content: string): UntrustedSource {
+function source(def: ScenarioDef, type: UntrustedSource["type"], label: string, title: string, from: string | null, content: string): UntrustedSource {
   const preview = plainTextPreview(content);
-  return { type, label, title, from, preview: preview.text, previewTruncated: preview.truncated, analysis: analyzeInstructions(content, label) };
+  const senderDomain = from?.match(/@([A-Za-z0-9.-]+)/)?.[1];
+  const assessment = assessSource({ task: def.task.goal, origin: label, content, extraDomains: senderDomain ? [senderDomain] : [] });
+  return { type, label, title, from, preview: preview.text, previewTruncated: preview.truncated, analysis: analyzeInstructions(content, label), assessment };
 }
 
 export function inspectSources(def: ScenarioDef, sandbox: RunSandbox): UntrustedSource[] {
@@ -57,7 +62,7 @@ export function inspectSources(def: ScenarioDef, sandbox: RunSandbox): Untrusted
       // Same mapping as the fetch_web tool: https://host/page -> web/<host>/<page>.html
       const page = url.pathname === "/" ? "/index.html" : url.pathname.endsWith(".html") ? url.pathname : `${url.pathname}.html`;
       const content = safeRead(sandbox.web, `${url.hostname}${page}`);
-      if (content !== null) out.push(source("web", `web:https://${url.hostname}${url.pathname}`, url.hostname, null, content));
+      if (content !== null) out.push(source(def, "web", `web:https://${url.hostname}${url.pathname}`, url.hostname, null, content));
     } else if (step.op === "read_inbox") {
       let names: string[] = [];
       try {
@@ -73,7 +78,7 @@ export function inspectSources(def: ScenarioDef, sandbox: RunSandbox): Untrusted
           if (typeof m.id !== "string" || typeof m.body !== "string") continue;
           const subject = typeof m.subject === "string" ? m.subject : "";
           // Analyse exactly what the agent parses: subject + body.
-          out.push(source("email", `inbox:${m.id}`, subject || "(no subject)", typeof m.from === "string" ? m.from : null, `${subject}\n\n${m.body}`));
+          out.push(source(def, "email", `inbox:${m.id}`, subject || "(no subject)", typeof m.from === "string" ? m.from : null, `${subject}\n\n${m.body}`));
         } catch {
           /* malformed message: the tool would reject it too */
         }
@@ -82,7 +87,7 @@ export function inspectSources(def: ScenarioDef, sandbox: RunSandbox): Untrusted
       const rel = argValue(def, step.path);
       if (typeof rel !== "string") continue;
       const content = safeRead(sandbox.files, rel);
-      if (content !== null) out.push(source("document", `file:${rel}`, rel.split("/").pop() ?? rel, null, content));
+      if (content !== null) out.push(source(def, "document", `file:${rel}`, rel.split("/").pop() ?? rel, null, content));
     }
   }
   return out;

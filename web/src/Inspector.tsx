@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { IconAlert, IconArrowRight, IconBug, IconGlobe, IconInbox, IconFile, IconUser, ToolIcon } from "./icons";
+import { LevelBadge, SourceAssessmentPanel } from "./Assessment";
 import { matchDecision } from "./runUtil";
 import { IntegrityBadge, SourceChips } from "./provenance";
 import type { InspectorSource, Run, RunContent, Step } from "./types";
@@ -10,13 +11,14 @@ import { Badge, cx, DecisionChip, Empty, Panel, Spinner } from "./ui";
 // which tool requests resulted, and what the policy engine decided. All text is rendered as React text — HTML is shown
 // as inert source/preview, never executed.
 
-export function useRunContent(runId: string | null) {
+/** `version` changes as the run progresses (state, step count), so the per-run enforcement outcome stays current. */
+export function useRunContent(runId: string | null, version = "") {
   const [content, setContent] = useState<RunContent | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useEffect(() => setContent(null), [runId]);
   useEffect(() => {
     if (!runId) return;
     let stop = false;
-    setContent(null);
     api
       .content(runId)
       .then((c) => !stop && setContent(c))
@@ -24,7 +26,7 @@ export function useRunContent(runId: string | null) {
     return () => {
       stop = true;
     };
-  }, [runId]);
+  }, [runId, version]);
   return { content, error };
 }
 
@@ -100,9 +102,11 @@ function SourceInspector({ source, run }: { source: InspectorSource; run: Run | 
           </div>
         </div>
         <span className="ml-auto">
-          <IntegrityBadge integrity="UNTRUSTED" />
+          <IntegrityBadge integrity={source.assessment.sourceTrust === "TRUSTED" ? "TRUSTED" : "UNTRUSTED"} />
         </span>
       </div>
+
+      <SourceAssessmentPanel source={source} />
 
       <div className="grid gap-4 xl:grid-cols-2">
         <div>
@@ -206,6 +210,21 @@ export function ContentInspector({ content, run, compact }: { content: RunConten
           <Empty title="No untrusted content captured">This scenario reads only the user's own task data (task files are never shown here).</Empty>
         ) : (
           content.sources.map((s) => <SourceInspector key={s.label} source={s} run={run} />)
+        )}
+        {content.outgoing.length > 0 && (
+          <div className="rounded-xl border border-line bg-ink-950/40 p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Outgoing emails · content check (advisory; text not shown)</p>
+            <ul className="mt-2 space-y-1.5">
+              {content.outgoing.map((o) => (
+                <li key={o.seq} className="flex flex-wrap items-center gap-2 text-sm text-slate-300">
+                  <DecisionChip decision={o.decision} ruleId={o.ruleId} />
+                  <span>{o.recipient === "requesting_user" ? "to the requesting user" : o.recipient === "external" ? "to an external recipient" : "recipient unknown"}</span>
+                  <LevelBadge level={o.level} label="embedded instructions" />
+                  <span className="text-xs text-slate-500">{o.note}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
     </Panel>

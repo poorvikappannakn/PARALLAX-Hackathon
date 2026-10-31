@@ -40,7 +40,12 @@ The **tool-call boundary** (`ToolGateway`). Everything the agent decides is untr
 | Data leakage through the UI/API | Dashboard shows exfiltrated keys or an injected subject | Explicit allowlist projections only: no traces, argument values, bodies, subjects, contents, hashes or paths; untrusted values masked in PEP reasons | tests (views, api-runs, api-sse, e2e) |
 | Operator secret brute force | Repeated login attempts | 32-byte random secret, constant-time comparison, 10 attempts/min | tests |
 
+| Social engineering of the user via content | Phishing link (`paypa1.com`), fake SYSTEM message, concealment | Advisory instruction and URL analyzers raise explained alerts (`docs/SECURITY_DESIGN.md`); links are never visited; enforcement stays with the PEP | tests (security-analysis) |
+| Encoded / hidden injections | base64, entities, zero-width characters, hidden markup | Decoded before analysis; the PEP decides on provenance regardless of wording | tests (security-analysis) |
+| Dangerous attachments / links | Executable attachment, shortened or IP URL | Email parser rejects attachments; the agent has no browse/execute tool; URLs analysed offline only | tests |
+
 ## Out of scope / known limitations
+- The instruction and URL analyzers are rule-based and advisory: they can miss paraphrases or flag benign imperatives; no reputation feed or Public Suffix List is used.
 - The agent is simulated (deterministic). Real-LLM mode is a stretch item; with it, argument provenance is traced conservatively.
 - The injection detector is heuristic and only escalates; security does not depend on it.
 - Provenance relies on tools labelling their outputs; a real deployment needs the tool framework (e.g. MCP gateway) to do this.

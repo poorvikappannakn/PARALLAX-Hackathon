@@ -156,9 +156,10 @@ export function LabResults({ runs, plan, onOpenRun }: { runs: Run[]; plan: LabPl
   const onId = runs.find((r) => r.mode === "on")?.runId ?? null;
   const off = useLive(offId);
   const on = useLive(onId);
-  const content = useRunContent(onId ?? offId);
   const offRun = off.run ?? runs.find((r) => r.mode === "off") ?? null;
   const onRun = on.run ?? runs.find((r) => r.mode === "on") ?? null;
+  const shown = onRun ?? offRun;
+  const content = useRunContent(onId ?? offId, shown ? `${shown.state}:${shown.steps.length}` : "");
 
   return (
     <div className="space-y-5 animate-fade-in">

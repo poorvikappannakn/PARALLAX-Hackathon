@@ -114,6 +114,7 @@ export interface PendingApproval {
   arguments: Argument[];
   context: Label | null;
   recipient: "requesting_user" | "external" | null;
+  outgoing: OutgoingContent | null;
 }
 
 export interface RunSummary {
@@ -164,6 +165,66 @@ export interface InspectorSource {
   preview: string;
   previewTruncated: boolean;
   instructions: InspectorInstruction[];
+  assessment: SecurityAssessment;
+  enforcement: Enforcement | null;
+}
+
+export interface OutgoingContent {
+  analysed: boolean;
+  level: ThreatLevel;
+  categories: string[];
+  note: string;
+}
+
+export interface Enforcement {
+  mode: Mode;
+  requested: number;
+  executed: { tool: string; ruleId: string | null }[];
+  denied: { tool: string; ruleId: string | null }[];
+  pending: { tool: string; ruleId: string | null }[];
+  statement: string;
+}
+
+export type ThreatLevel = "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
+
+export interface UrlFinding {
+  url: string;
+  hostname: string | null;
+  unicodeHostname: string | null;
+  registrableDomain: string | null;
+  risk: ThreatLevel;
+  score: number | null;
+  confidence: string;
+  summary: string;
+  reputation: string;
+  knownOfficialDomain: boolean;
+  indicators: { id: string; severity: string; reason: string }[];
+}
+
+export interface SecurityAlert {
+  level: "MEDIUM" | "HIGH";
+  detected: string;
+  origin: string;
+  why: string[];
+  attemptedActions: string[];
+  potentialImpact: string;
+  contentHandling: string;
+}
+
+export interface SecurityAssessment {
+  sourceTrust: "TRUSTED" | "UNTRUSTED" | "UNKNOWN";
+  instructionThreat: {
+    level: ThreatLevel;
+    score: number | null;
+    confidence: string;
+    summary: string;
+    uncertainty: string | null;
+    counts: { information: number; instruction: number; suspicious: number };
+    sentences: { evidence: string; role: string; level: ThreatLevel; decoded: boolean; conflictsWithObjective: boolean; findings: { category: string; severity: string; reason: string }[] }[];
+  };
+  urlRisk: ThreatLevel | null;
+  urls: UrlFinding[];
+  alert: SecurityAlert | null;
 }
 
 export interface RunContent {
@@ -172,6 +233,7 @@ export interface RunContent {
   task: string;
   plan: string[];
   sources: InspectorSource[];
+  outgoing: (OutgoingContent & { seq: number; decision: string | null; ruleId: string | null; recipient: "requesting_user" | "external" | null })[];
 }
 
 export interface LabPlan {
@@ -216,6 +278,7 @@ export interface AuditExplorerEvent {
   ruleId: string | null;
   outcome: string | null;
   reason: string | null;
+  threat: { instruction: ThreatLevel | null; url: ThreatLevel | null; alerts: number };
 }
 
 export interface SessionInfo {

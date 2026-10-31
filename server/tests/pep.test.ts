@@ -326,7 +326,7 @@ describe("decisions are inspectable and deterministic", () => {
     expect(d.ruleId).toBeTruthy();
     expect(d.reasons.length).toBeGreaterThan(0);
     expect(Object.keys(d.argProvenance).sort()).toEqual(["body", "subject", "to"]);
-    expect(d.policyVersion).toBe("agentshield-enforce@1.0.0");
+    expect(d.policyVersion).toBe("agentshield-enforce@1.1.0");
   });
 
   it("same input -> identical decision", () => {

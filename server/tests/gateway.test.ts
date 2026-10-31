@@ -93,7 +93,7 @@ describe("audit: fail-closed and ordered", () => {
     expect(g.gateway.request({ tool: "read_file", args: { path: { ref: "task.report" } } }).status).toBe("ok");
     const [started, decision, outcome] = g.stores.audit.listEvents(g.run.id);
     expect([started!.kind, decision!.kind, outcome!.kind]).toEqual(["run_started", "decision", "outcome"]);
-    expect(decision).toMatchObject({ userId: "user:alice", agentId: "agent:research-assistant", tool: "read_file", decision: "ALLOW", ruleId: "L1", policyId: "agentshield-enforce@1.0.0" });
+    expect(decision).toMatchObject({ userId: "user:alice", agentId: "agent:research-assistant", tool: "read_file", decision: "ALLOW", ruleId: "L1", policyId: "agentshield-enforce@1.1.0" });
     expect(decision!.callHash).toMatch(/^[0-9a-f]{64}$/);
     expect(outcome).toMatchObject({ outcome: "executed", callHash: decision!.callHash });
     expect(decision!.seq).toBeLessThan(outcome!.seq);

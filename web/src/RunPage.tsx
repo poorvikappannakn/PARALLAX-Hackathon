@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { OutgoingNote } from "./Assessment";
 import { api, ApiError } from "./api";
 import {
   IconActivity,
@@ -290,6 +291,7 @@ export function ApprovalPanel({ runId }: { runId: string }) {
               </p>
             </div>
           )}
+          {approval.outgoing && <OutgoingNote outgoing={approval.outgoing} />}
           <p className="rounded-xl bg-white/[0.03] p-3 text-xs leading-relaxed text-slate-400 ring-1 ring-white/10">
             Approving lets the policy engine re-evaluate <b className="text-slate-200">this exact call</b> — same tool, arguments and their provenance,
             run, agent, user and policy version. DENY rules are checked again and can never be overridden. The approval is single-use and
@@ -597,10 +599,10 @@ const TABS = [
 
 export function RunPage({ runId, onRunAgain }: { runId: string; onRunAgain: (scenarioId: string, mode: "on" | "off") => void }) {
   const live = useRunStream(runId);
-  const content = useRunContent(runId);
   const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("timeline");
   const refreshed = useRef(false);
   const run = live.run;
+  const content = useRunContent(runId, run ? `${run.state}:${run.steps.length}` : "");
 
   useEffect(() => {
     if (live.finished && !refreshed.current) {

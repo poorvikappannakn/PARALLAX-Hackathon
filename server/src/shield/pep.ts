@@ -15,6 +15,7 @@ import {
   type Label,
 } from "./provenance.js";
 import { stricter, type DecisionKind, type RuleId } from "./rules.js";
+import { analyzeUrl } from "../analysis/url-analyzer.js";
 
 // Policy Enforcement Point. A pure, deterministic function: no I/O, no clock reads (`now` is passed in).
 // Order: structural fail-closed checks (F0) -> DENY rules (P1-P4, never overridable) ->
@@ -58,7 +59,7 @@ export interface PepEnv {
 
 export interface Decision {
   readonly decision: DecisionKind;
-  readonly ruleId: RuleId | `${"A1" | "A2" | "A3"}+APPROVED` | "OFF";
+  readonly ruleId: RuleId | `${"A1" | "A2" | "A3" | "U2"}+APPROVED` | "OFF";
   readonly matchedRules: readonly string[];
   readonly reasons: readonly string[];
   readonly risk: number;
@@ -172,6 +173,8 @@ function evaluateUnchecked(rawCall: unknown, env: PepEnv): Decision {
 
   // ---- DENY rules (never overridable) ------------------------------------------------------
   const denies: { rule: RuleId; reason: string }[] = [];
+  let urlNeedsApproval: string | null = null;
+  let urlAdvisory: string | null = null;
   const effectiveClearance = minConfidentiality(user.clearance, profile.maxConfidentiality);
 
   if (!profile.allowedTools.includes(call.tool)) {
@@ -210,6 +213,15 @@ function evaluateUnchecked(rawCall: unknown, env: PepEnv): Decision {
         !profile.urlAllowlist.includes(url.hostname)
       ) {
         denies.push({ rule: "P2", reason: `URL "${String(values[name])}" is not an allow-listed https host for ${profile.id}` });
+      }
+      // URL risk is re-computed here from the call's own value (offline, pure: no DNS, no fetch) — never taken from
+      // the client or an earlier assessment. HIGH => DENY (U1); MEDIUM => approval (U2); UNKNOWN => advisory only.
+      if (manifest.name === "fetch_web") {
+        const u = analyzeUrl(String(values[name]));
+        const why = u.indicators.map((i) => i.id).join(", ");
+        if (u.risk === "HIGH") denies.push({ rule: "U1", reason: `URL risk HIGH (${why})` });
+        else if (u.risk === "MEDIUM") urlNeedsApproval = `URL risk MEDIUM (${why})`;
+        else if (u.risk === "UNKNOWN") urlAdvisory = "URL risk UNKNOWN: no indicators, domain not in the known list, no reputation data (advisory)";
       }
     }
   }
@@ -269,11 +281,17 @@ function evaluateUnchecked(rawCall: unknown, env: PepEnv): Decision {
       risk = 40;
       reasons.push(`A2: ${call.tool} is high-impact and requires user confirmation`);
     }
+  } else if (manifest.effect === "READ" && manifest.impact === "LOW" && urlNeedsApproval) {
+    decision = "REQUIRE_APPROVAL";
+    ruleId = "U2";
+    risk = 60;
+    reasons.push(`U2: ${urlNeedsApproval}`);
   } else if (manifest.effect === "READ" && manifest.impact === "LOW") {
     decision = "ALLOW";
     ruleId = "L1";
     risk = 10;
     reasons.push(`L1: low-impact read within scope and clearance`);
+    if (urlAdvisory) reasons.push(urlAdvisory);
   } else {
     return Object.freeze({ ...base, decision: "DENY", ruleId: "DEFAULT", matchedRules: ["DEFAULT"], reasons: ["DEFAULT: no rule allows this call"], risk: 90 });
   }
@@ -299,7 +317,7 @@ function evaluateUnchecked(rawCall: unknown, env: PepEnv): Decision {
     return Object.freeze({
       ...base,
       decision: "ALLOW",
-      ruleId: `${ruleId as "A1" | "A2" | "A3"}+APPROVED`,
+      ruleId: `${ruleId as "A1" | "A2" | "A3" | "U2"}+APPROVED`,
       matchedRules: [...matchedRules, "APPROVED"],
       reasons: [...reasons, `Approved by ${env.approval.approverId} (approval ${env.approval.id}); all DENY rules re-checked`],
       risk,

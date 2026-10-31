@@ -13,7 +13,7 @@ describe("policy loading", () => {
     const on = loadShieldConfig("on");
     const off = loadShieldConfig("off");
     expect(on.policy?.mode).toBe("enforce");
-    expect(on.policy?.policyVersion).toBe("agentshield-enforce@1.0.0");
+    expect(on.policy?.policyVersion).toBe("agentshield-enforce@1.1.0");
     expect(off.policy?.mode).toBe("permissive");
     expect(on.policyError).toBeNull();
   });

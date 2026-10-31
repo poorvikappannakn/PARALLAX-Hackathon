@@ -20,7 +20,7 @@ expired approvals → DENY (F0). If the decision audit row cannot be written, no
 written, the run halts (`audit_failure`) and the UI shows it as failed. Structural F0 checks apply even with the shield off (S5).
 
 **Can a human approval override a DENY? Can an approval be reused?**
-No and no. DENY rules (F0, P1–P4) are evaluated first and are never sent for approval. An approval is bound to a SHA-256 hash of
+No and no. DENY rules (F0, P1–P4, U1) are evaluated first and are never sent for approval. An approval is bound to a SHA-256 hash of
 the exact call — tool, canonical arguments with their provenance, run, agent, user and policy version — and the PEP re-evaluates
 the stored call after the decision (DENY rules can still deny). Consumption is a single atomic `UPDATE … WHERE used = 0` in the
 same transaction as its audit row; replays are rejected and audited. The approver must be a registered operator, taken from the
@@ -61,6 +61,20 @@ Tasks are interpreted the same way (summarise/report → read + email summary; r
 **Does the email's sender or subject matter?**
 No. Sender, recipient and subject are display data; the whole message is labelled UNTRUSTED by the inbox tool, and an email
 cannot grant permissions, approve anything or change the user's task.
+
+**Does AgentShield treat every external email as malicious?**
+No. Source trust (TRUSTED / UNTRUSTED / UNKNOWN) and threat level (LOW / MEDIUM / HIGH / UNKNOWN) are separate. An ordinary
+vendor email is UNTRUSTED but LOW and raises no alert; it is read automatically (L1). Only evidence — an instruction that
+overrides the task, requests credentials, sends data to a content-chosen recipient, hides itself, etc. — raises the level.
+Single words like "password" or "delete" do not.
+
+**How do you tell paypal.com from paypa1.com?**
+The offline URL analyzer: parsed hostname, registrable domain, digit/homoglyph skeleton and edit distance against a small list
+of official brand domains, plus userinfo, IP, port, shortener, punycode and redirect checks. `paypal.com` is LOW ("not a
+guarantee"), `paypa1.com` HIGH (typosquat), an unknown domain UNKNOWN. Links are never visited. See `docs/SECURITY_DESIGN.md`.
+
+**If the detectors miss an attack, what happens?**
+Nothing different: the instruction analyzer is advisory. The PEP decides from provenance and permissions, so a missed injection still meets P2/P4/P1. (URL risk is the one analysis the PEP enforces itself, for `fetch_web`: HIGH ⇒ U1 DENY, MEDIUM ⇒ U2 approval.)
 
 **Is the agent an LLM?**
 No. It is a deterministic, deliberately gullible rule-based agent with a regex instruction parser, so the demo is reproducible

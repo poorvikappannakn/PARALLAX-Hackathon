@@ -19,6 +19,7 @@ failing closed when policy or provenance is insufficient.
 | Interactive Attack Lab | Your own task + your own malicious web page/document (typed or `.txt`/`.html` upload ≤ 100 KB), run OFF and ON side by side |
 | Email Security Lab | Three synthetic emails (legitimate, secret exfiltration, deletion) or an uploaded `.eml`/`.txt`/`.html` (safe parsing subset) |
 | Untrusted Content Inspector | The exact injected sentences, their signals, the tool requests they produced and the PEP decision for each |
+| Security assessment | Per source: source trust, instruction threat and URL risk as separate, explained classifications, plus an alert only when evidence justifies it (rule-based, advisory — the PEP enforces; for `fetch_web` the PEP itself denies HIGH-risk URLs (U1) and requires approval for MEDIUM (U2)) |
 | Audit Explorer | Every audit event of the session's runs, filterable, with masked policy reasons |
 
 Labs use the same agent, policy engine, gateway, sandbox and audit as S1–S5: the supplied content is written into each
@@ -55,6 +56,7 @@ there is no real network access, real email, or shell execution.
 - [Project overview](docs/PROJECT_OVERVIEW.md)
 - [System architecture](docs/SYSTEM_ARCHITECTURE.md)
 - [Threat model](docs/THREAT_MODEL.md)
+- [Security design: detection, alerts, enforcement](docs/SECURITY_DESIGN.md)
 - [Database design](docs/DATABASE_DESIGN.md)
 - [API specification](docs/API_SPECIFICATION.md)
 - [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
