@@ -9,46 +9,58 @@ import { Badge, Button, cx, DecisionChip, Empty, ErrorNote, fmtTime, ModeBadge, 
 
 function Hero({ onLab, onLaunchS2, busy }: { onLab: () => void; onLaunchS2: () => void; busy: boolean }) {
   return (
-    <section className="relative overflow-hidden rounded-3xl border border-line bg-gradient-to-br from-ink-850 via-ink-900 to-ink-950 px-6 py-8 sm:px-10 sm:py-10">
+    <section className="relative overflow-hidden rounded-3xl border border-line bg-gradient-to-br from-ink-850 via-ink-900 to-ink-950 px-5 py-6 sm:px-7 sm:py-7 lg:px-8 lg:py-8">
       <div className="pointer-events-none absolute -right-32 -top-40 h-96 w-96 rounded-full bg-cyan-400/10 blur-3xl" aria-hidden />
       <div className="pointer-events-none absolute -bottom-40 left-1/3 h-80 w-80 rounded-full bg-blue-500/10 blur-3xl" aria-hidden />
-      <div className="relative grid items-center gap-8 lg:grid-cols-[1.4fr_1fr]">
+      <div className="relative grid items-center gap-5 lg:grid-cols-[1.4fr_1fr]">
         <div>
           <p className="inline-flex items-center gap-2 rounded-full bg-cyan-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-cyan-300 ring-1 ring-cyan-400/25">
             <IconShieldCheck size={14} /> Policy enforcement for tool-using AI agents
           </p>
-          <h1 className="mt-4 text-3xl font-semibold leading-tight tracking-tight text-white sm:text-[40px]">
+          <h1 className="mt-3 text-3xl font-semibold leading-tight tracking-tight text-white sm:text-4xl">
             Secure the agent's <span className="bg-gradient-to-r from-cyan-300 to-blue-400 bg-clip-text text-transparent">actions</span>, not just its prompt.
           </h1>
-          <p className="mt-4 max-w-2xl text-base leading-relaxed text-slate-300">
+          <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-slate-300">
             AgentShield sits between an AI agent and its tools. Every value carries <b className="text-slate-100">provenance</b> — where it came
             from and how sensitive it is — and every tool call is decided <b className="text-emerald-300">ALLOW</b>, <b className="text-rose-300">DENY</b> or{" "}
             <b className="text-amber-300">REQUIRE APPROVAL</b> by a deterministic policy engine, before anything runs. Injected instructions can
             make the agent <i>try</i>; they cannot make it <i>succeed</i>.
           </p>
-          <div className="mt-6 flex flex-wrap gap-3">
-            <Button size="lg" onClick={onLaunchS2} busy={busy}>
+          <p className="mt-3 max-w-2xl rounded-xl border border-line bg-ink-950/50 px-3.5 py-2.5 text-sm leading-relaxed text-slate-300">
+            <span className="font-semibold text-cyan-300">What the demo shows:</span> the same agent, tools and data run twice — Shield OFF, the
+            injected attack succeeds; Shield ON, the policy blocks it and the legitimate task still completes.
+          </p>
+          <div className="mt-5 flex flex-wrap gap-2.5">
+            <Button onClick={onLaunchS2} busy={busy}>
               <IconShieldOff size={18} /> Run the prompt-injection attack
             </Button>
-            <Button size="lg" variant="secondary" onClick={onLab}>
+            <Button variant="secondary" onClick={onLab}>
               <IconBug size={18} /> Write your own attack
             </Button>
           </div>
+          <ul className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-slate-400" aria-label="Prototype scope">
+            {["Deterministic simulated agent (not an LLM)", "Synthetic data only", "Per-run local sandbox"].map((t) => (
+              <li key={t} className="flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-cyan-400/70" aria-hidden />
+                {t}
+              </li>
+            ))}
+          </ul>
         </div>
-        <ol className="grid gap-3 text-sm">
+        <ol className="grid gap-2.5 text-sm">
           {[
             { icon: <IconLayers size={18} />, title: "Label every value", text: "Task and profile data are TRUSTED; web pages, inbox and files are UNTRUSTED with a confidentiality level." },
             { icon: <IconShield size={18} />, title: "Decide every tool call", text: "Rules check where each argument came from and what the tool can affect. Missing data fails closed." },
             { icon: <IconHand size={18} />, title: "Humans approve the rest", text: "High-impact calls pause for an operator; the approval is bound to that exact call and used once." },
           ].map((s, i) => (
-            <li key={s.title} className="flex gap-3 rounded-2xl border border-line bg-ink-950/50 p-4">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-cyan-400/10 text-cyan-300 ring-1 ring-cyan-400/20">{s.icon}</span>
+            <li key={s.title} className="flex gap-3 rounded-xl border border-line bg-ink-950/50 p-3">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-cyan-400/10 text-cyan-300 ring-1 ring-cyan-400/20">{s.icon}</span>
               <div>
                 <p className="font-semibold text-slate-100">
                   <span className="mr-1.5 font-mono text-xs text-slate-500">0{i + 1}</span>
                   {s.title}
                 </p>
-                <p className="mt-0.5 text-slate-400">{s.text}</p>
+                <p className="mt-0.5 text-[13px] leading-relaxed text-slate-400">{s.text}</p>
               </div>
             </li>
           ))}
@@ -162,6 +174,16 @@ export function RunRow({ r, onOpen }: { r: RunSummary; onOpen: (id: string) => v
   );
 }
 
+/** Small eyebrow heading that groups Overview sections. */
+function SectionLabel({ children }: { children: string }) {
+  return (
+    <h2 className="flex items-center gap-3 pt-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+      {children}
+      <span className="h-px flex-1 bg-line" aria-hidden />
+    </h2>
+  );
+}
+
 function ArchitectureStrip() {
   const steps = [
     { icon: <IconUser size={16} />, title: "User task", text: "TRUSTED", tone: "text-emerald-300" },
@@ -172,16 +194,16 @@ function ArchitectureStrip() {
     { icon: <IconList size={16} />, title: "Audit log", text: "written before & after", tone: "text-slate-300" },
   ];
   return (
-    <Panel title="How AgentShield enforces" subtitle="Every tool call takes this path — there is no other way for the agent to act" icon={<IconShield size={16} />}>
-      <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+    <Panel title="How AgentShield enforces" subtitle="Every tool call takes this path — there is no other way for the agent to act" icon={<IconShield size={16} />} className="[&>header]:px-4 [&>header]:py-3 [&>div:last-child]:p-4">
+      <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
         {steps.map((s, i) => (
           <li key={s.title} className="relative rounded-xl border border-line bg-ink-950/50 p-3">
             <span className={cx("flex items-center gap-2 text-sm font-semibold text-slate-100")}>
               <span className="text-slate-400">{s.icon}</span>
               {s.title}
             </span>
-            <span className={cx("mt-1 block text-xs", s.tone)}>{s.text}</span>
-            {i < steps.length - 1 && <IconArrowRight size={14} className="absolute -right-2.5 top-1/2 hidden -translate-y-1/2 text-slate-600 lg:block" />}
+            <span className={cx("mt-1 block text-[13px]", s.tone)}>{s.text}</span>
+            {i < steps.length - 1 && <IconArrowRight size={14} className="absolute -right-2.5 top-1/2 hidden -translate-y-1/2 text-slate-600 2xl:block" />}
           </li>
         ))}
       </ol>
@@ -220,11 +242,15 @@ export function Overview({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 xl:space-y-4">
       <Hero onLab={() => onNavigate("attack")} onLaunchS2={launchS2} busy={heroBusy} />
       <ErrorNote error={error ?? data.error} />
 
-      <section aria-label="Security overview" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <SectionLabel>Live session</SectionLabel>
+      <section
+        aria-label="Security overview"
+        className="-mt-2 grid gap-3 sm:grid-cols-2 sm:[&>div:last-child]:col-span-2 xl:grid-cols-5 xl:[&>div:last-child]:col-span-1 [&>div]:p-4 [&>div]:border-t-2 [&>div]:border-t-line-strong"
+      >
         <Stat label="Runs this session" value={o?.runs ?? "—"} hint={o ? `${o.live} executing` : "Loading…"} icon={<IconActivity size={18} />} />
         <Stat label="Allowed actions" value={o?.decisions.allow ?? "—"} tone="good" hint="Policy decisions: ALLOW" icon={<IconShieldCheck size={18} />} />
         <Stat label="Denied actions" value={o?.decisions.deny ?? "—"} tone="bad" hint="Policy decisions: DENY" icon={<IconBan size={18} />} />
@@ -237,33 +263,37 @@ export function Overview({
           icon={<IconShield size={18} />}
         />
       </section>
-      <p className="-mt-3 text-xs text-slate-500">
+      <p className="-mt-2 text-[13px] leading-relaxed text-slate-500">
         Shield mode is chosen per run. Counts cover the interactive runs the API holds in memory (scenarios and labs); the suite comparison is separate.
       </p>
 
+      <SectionLabel>How enforcement works</SectionLabel>
       <ArchitectureStrip />
 
-      <section aria-label="Start here" className="grid gap-4 md:grid-cols-3">
+      <SectionLabel>Try the demo</SectionLabel>
+      <section aria-label="Start here" className="-mt-2 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {[
           { page: "scenarios" as const, icon: <IconLayers size={20} />, title: "Predefined scenarios", text: "S1–S5: legitimate task, prompt injection, sensitive data, beyond-permission, fail-closed." },
           { page: "attack" as const, icon: <IconBug size={20} />, title: "Interactive Attack Lab", text: "Write or upload your own malicious page or document and run it with the shield off and on." },
           { page: "email" as const, icon: <IconMail size={20} />, title: "Email Security Lab", text: "Feed the agent a malicious email and watch the policy engine stop secret theft and deletion." },
         ].map((c) => (
-          <button key={c.page} onClick={() => onNavigate(c.page)} className="group rounded-2xl border border-line bg-ink-900/70 p-5 text-left transition-colors hover:border-cyan-400/40">
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-cyan-400/10 text-cyan-300 ring-1 ring-cyan-400/20">{c.icon}</span>
-            <p className="mt-3 flex items-center gap-2 font-semibold text-slate-100">
+          <button key={c.page} onClick={() => onNavigate(c.page)} className="group rounded-2xl border border-line bg-ink-900/70 p-4 text-left transition-colors hover:border-cyan-400/40">
+            <span className="grid h-9 w-9 place-items-center rounded-lg bg-cyan-400/10 text-cyan-300 ring-1 ring-cyan-400/20">{c.icon}</span>
+            <p className="mt-2 flex items-center gap-2 font-semibold text-slate-100">
               {c.title} <IconArrowRight size={15} className="text-slate-500 transition-transform group-hover:translate-x-0.5" />
             </p>
-            <p className="mt-1 text-sm text-slate-400">{c.text}</p>
+            <p className="mt-1 text-sm leading-relaxed text-slate-400">{c.text}</p>
           </button>
         ))}
       </section>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <SectionLabel>Audit trail</SectionLabel>
+      <div className="-mt-2 grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
         <Panel
           title="Recent security events"
           subtitle="Denials and approval requests from the audit log"
           icon={<IconBan size={16} />}
+          className="[&>header]:px-4 [&>header]:py-3 [&>div:last-child]:p-4"
           actions={
             <Button variant="ghost" size="sm" onClick={() => onNavigate("audit")}>
               Audit Explorer <IconArrowRight size={14} />
@@ -306,6 +336,7 @@ export function Overview({
           title="Recent runs"
           subtitle="Scenario and lab runs in this server session"
           icon={<IconActivity size={16} />}
+          className="[&>header]:px-4 [&>header]:py-3 [&>div:last-child]:p-4"
           actions={
             runs.length > 0 && (
               <Button variant="ghost" size="sm" onClick={() => onNavigate("activity")}>
